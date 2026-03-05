@@ -14,7 +14,12 @@ def get_fernet():
         postgres_secrets = st.secrets.get("postgres", {})
         key = postgres_secrets.get("encryption_key")
         if not key:
-            st.error("Encryption error: 'encryption_key' missing in [postgres] section of secrets.")
+            st.error("""
+            **Encryption key missing!**
+            
+            This key is required for security. Please add it to your **Streamlit Cloud Dashboard** 
+            under the `[postgres]` section in **Secrets**.
+            """)
             return None
         return Fernet(key.encode())
     except Exception as e:
