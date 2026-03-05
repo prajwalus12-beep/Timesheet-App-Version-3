@@ -11,10 +11,14 @@ FIXED_PASSWORD = "NyT@i9Us!Q7kLm2Z"
 def get_fernet():
     """Returns a Fernet instance using the key from secrets."""
     try:
-        key = st.secrets["postgres"]["encryption_key"].encode()
-        return Fernet(key)
+        postgres_secrets = st.secrets.get("postgres", {})
+        key = postgres_secrets.get("encryption_key")
+        if not key:
+            st.error("Encryption error: 'encryption_key' missing in [postgres] section of secrets.")
+            return None
+        return Fernet(key.encode())
     except Exception as e:
-        st.error(f"Encryption error: Missing or invalid encryption key. {e}")
+        st.error(f"Encryption error: {e}")
         return None
 
 def encrypt_data(text):

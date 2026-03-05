@@ -2,7 +2,7 @@ import streamlit as st
 from contextlib import contextmanager
 
 # Load secrets
-DB_CONFIG = st.secrets["postgres"]
+DB_CONFIG = st.secrets.get("postgres", {})
 
 @st.cache_resource
 def get_supabase_client():
