@@ -22,13 +22,26 @@ def generate_captcha_image(code: str) -> io.BytesIO:
     draw = ImageDraw.Draw(img)
 
     # --- Use a built-in font at a reasonable size ---
-    try:
-        font = ImageFont.truetype("arial.ttf", 55)
-    except OSError:
+    # Try multiple font paths to work on both Windows and Linux (Streamlit Cloud)
+    font = None
+    font_paths = [
+        "arial.ttf",                                          # Windows (by name)
+        "C:/Windows/Fonts/arial.ttf",                         # Windows (full path)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux (Debian/Ubuntu)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",       # Linux (Debian/Ubuntu)
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",              # Linux (Arch)
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf", # Linux (Fedora)
+        "DejaVuSans-Bold.ttf",                                   # By name fallback
+    ]
+    for path in font_paths:
         try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 55)
-        except OSError:
-            font = ImageFont.load_default()
+            font = ImageFont.truetype(path, 55)
+            break
+        except (OSError, IOError):
+            continue
+    if font is None:
+        # Last resort: use default font (will be small but functional)
+        font = ImageFont.load_default()
 
     # --- Draw each character with slight rotation & jitter ---
     char_width = width // (len(code) + 1)
