@@ -2,7 +2,7 @@ import streamlit as st
 import random
 import time
 from database.queries import get_all_users
-from services.auth_service import login_user
+from services.auth_service import login_user, create_session_token
 
 
 def _new_captcha():
@@ -110,6 +110,10 @@ def render_login_page():
                         else:
                             st.session_state["logged_in"] = True
                             st.session_state["user"] = res
+                            # Persist session token for browser refresh
+                            token = create_session_token(res)
+                            if token:
+                                st.query_params["session"] = token
                             if "captcha_code" in st.session_state:
                                 del st.session_state["captcha_code"]
                             st.success("Login Successful!")

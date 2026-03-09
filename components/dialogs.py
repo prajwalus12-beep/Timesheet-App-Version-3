@@ -2,7 +2,7 @@ import streamlit as st
 import datetime
 import time
 from database.queries import get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password, update_user_password
-from services.auth_service import is_password_strong, hash_password
+from services.auth_service import is_password_strong, encrypt_data
 
 @st.dialog("Update Password")
 def update_password_dialog(username):
@@ -29,8 +29,8 @@ def update_password_dialog(username):
             st.error(msg)
             return
 
-        hashed = hash_password(new_pwd)
-        update_user_password(username, hashed)
+        encrypted = encrypt_data(new_pwd)
+        update_user_password(username, encrypted)
         st.success("Password updated successfully!")
         time.sleep(1.5)
         st.rerun()

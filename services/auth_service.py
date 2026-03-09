@@ -1,6 +1,7 @@
 import streamlit as st
 import bcrypt
 import re
+import json
 import secrets
 import string
 from cryptography.fernet import Fernet
@@ -103,12 +104,48 @@ def login_user(username, password):
             return {"error": f"Invalid password. Attempt {new_failed}/5."}
     return {"error": "User not found."}
 
+def create_session_token(user_data):
+    """Create an encrypted session token from user data."""
+    try:
+        f = get_fernet()
+        if f:
+            payload = json.dumps(user_data)
+            return f.encrypt(payload.encode()).decode()
+    except:
+        pass
+    return None
+
+def restore_session_from_token(token):
+    """Decrypt a session token and return user data."""
+    try:
+        f = get_fernet()
+        if f:
+            payload = f.decrypt(token.encode()).decode()
+            return json.loads(payload)
+    except:
+        pass
+    return None
+
 def logout_user():
     for key in list(st.session_state.keys()): del st.session_state[key]
+    st.query_params.clear()
     st.rerun()
 
 def check_login():
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
         st.session_state["user"] = None
+
+    # Restore session from token on refresh
+    if not st.session_state["user"]:
+        token = st.query_params.get("session")
+        if token:
+            user_data = restore_session_from_token(token)
+            if user_data:
+                st.session_state["logged_in"] = True
+                st.session_state["user"] = user_data
+            else:
+                # Invalid/expired token — clear it
+                st.query_params.clear()
+
     return st.session_state["user"]

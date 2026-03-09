@@ -1,8 +1,7 @@
 import streamlit as st
-# Reloading...
 from database.queries import init_db
 from services.auth_service import check_login
-from components.navbar import render_navbar
+from components.sidebar import render_sidebar
 from pages.login_page import render_login_page
 from pages.timesheet_page import render_timesheet_page
 from pages.projects_page import render_projects_page
@@ -33,10 +32,10 @@ else:
     # 5. Routing
     if "page" not in st.session_state:
         st.session_state["page"] = "Timesheet Entries"
-    
-    # Navigation
-    render_navbar(user)
-    
+
+    # Sidebar Navigation
+    render_sidebar(user)
+
     # Page Content
     page = st.session_state["page"]
     if page == "Timesheet Entries": render_timesheet_page(user)
