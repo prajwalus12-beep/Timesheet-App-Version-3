@@ -37,7 +37,7 @@ def update_password_dialog(username):
 
 @st.dialog("Add New Entry")
 def entry_form_dialog(user, emp_options, current_emp_id):
-    filter_type = st.radio("Project Type", ["Incomplete", "Complete"], horizontal=True, key="entry_filter_type_modal")
+    filter_type = st.radio("Project Type", ["Inprogress", "Complete"], horizontal=True, key="entry_filter_type_modal")
     
     with st.form("add_time_form"):
         user_option_key = next((k for k, v in emp_options.items() if v == current_emp_id), None)
