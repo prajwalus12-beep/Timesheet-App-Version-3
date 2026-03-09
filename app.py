@@ -27,6 +27,13 @@ if "db_initialized" not in st.session_state:
 user = check_login()
 
 if not user:
+    # Hide sidebar when not logged in
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] { display: none; }
+            [data-testid="collapsedControl"] { display: none; }
+        </style>
+    """, unsafe_allow_html=True)
     render_login_page()
 else:
     # 5. Routing
