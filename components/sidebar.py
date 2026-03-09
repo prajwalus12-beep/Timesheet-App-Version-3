@@ -9,14 +9,6 @@ def render_sidebar(user):
     # --- Sidebar custom CSS ---
     st.sidebar.markdown("""
     <style>
-    /* Main content area - light grey */
-    .main .block-container {
-        background-color: #f0f2f6;
-    }
-    .main {
-        background-color: #f0f2f6;
-    }
-
     /* Sidebar - white background */
     [data-testid="stSidebar"] {
         background-color: #ffffff;

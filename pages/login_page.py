@@ -72,7 +72,15 @@ def render_login_page():
                 if "login_password" in st.session_state:
                     st.session_state["login_password"] = ""
 
-            username = st.selectbox("Username", username_list, on_change=on_user_change)
+            def format_username(uname):
+                return uname.replace(".", " ").title() if "." in uname else uname.title()
+
+            username = st.selectbox(
+                "Username", 
+                username_list, 
+                format_func=format_username,
+                on_change=on_user_change
+            )
 
             # --- Text CAPTCHA ---
             if "captcha_code" not in st.session_state:

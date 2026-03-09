@@ -35,7 +35,7 @@ def update_password_dialog(username):
         time.sleep(1.5)
         st.rerun()
 
-@st.dialog("Add New Entry - TEST")
+@st.dialog("Add New Entry")
 def entry_form_dialog(user, emp_options, current_emp_id):
     filter_type = st.radio("Project Type", ["Incomplete", "Complete"], horizontal=True, key="entry_filter_type_modal")
     
@@ -44,14 +44,14 @@ def entry_form_dialog(user, emp_options, current_emp_id):
         options = list(emp_options.keys())
         default_idx = options.index(user_option_key) if user_option_key in options else 0
         
-        entry_emp = st.selectbox("Employee", options, index=default_idx, key="entry_emp_modal")
+        entry_emp = st.selectbox("Employee", options, index=default_idx, disabled=True, key="entry_emp_modal")
         today = datetime.date.today()
         end_of_week = today + datetime.timedelta(days=(6 - today.weekday()))
         col_d, col_h = st.columns(2)
         with col_d:
             entry_date = st.date_input("Date", datetime.date.today(), max_value=end_of_week, format="DD-MM-YYYY", key="entry_date_modal")
         with col_h:
-            entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, key="entry_hours_modal")
+            entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, value=4.0, step=1.0, key="entry_hours_modal")
         
         all_projects_df = get_all_projects()
         filtered_projs = all_projects_df[all_projects_df['status'] == 'Complete'] if filter_type == "Complete" else all_projects_df[all_projects_df['status'] != 'Complete']
