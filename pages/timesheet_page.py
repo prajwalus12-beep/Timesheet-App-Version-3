@@ -1,6 +1,8 @@
 import streamlit as st
 import datetime
 import pandas as pd
+import io
+import openpyxl
 from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry
 from components.dialogs import entry_form_dialog, edit_form_dialog
 from utils.date_helpers import get_curr_cycle_dates
@@ -95,13 +97,48 @@ def render_timesheet_page(user):
     with btn_col2:
         st.write("")
         if not data.empty:
-            export_df = data.copy().rename(columns={'project_code': 'Job no', 'emp_name': 'Employee Name', 'project_name': 'Project Name', 'date': 'Date', 'hours': 'Hour', 'Phase': 'Phase'})
-            export_df['EmpCode'] = data['emp_id']
+            export_df = data.copy().rename(columns={
+                'project_code': 'Project_Code', 
+                'emp_name': 'Emp_Name', 
+                'project_name': 'Project_Name', 
+                'date': 'Date', 
+                'hours': 'Hours', 
+                'Phase': 'Phase'
+            })
+            export_df['Emp_Code'] = data['emp_id']
             export_df['Date'] = pd.to_datetime(export_df['Date']).dt.strftime('%d-%m-%Y')
             phase_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement"}
             export_df['Phase'] = export_df['Phase'].astype(str).map(phase_map).fillna(export_df['Phase'])
-            st.download_button("📥 Export CSV", export_df[['EmpCode', 'Employee Name', 'Date', 'Job no', 'Project Name', 'Hour', 'Phase']].to_csv(index=False), "timesheet_export.csv", "text/csv", use_container_width=True)
-
+            
+            # Convert columns to numeric to avoid Excel "Number Stored as Text" warnings
+            export_df['Emp_Code'] = pd.to_numeric(export_df['Emp_Code'], errors='ignore')
+            export_df['Project_Code'] = pd.to_numeric(export_df['Project_Code'], errors='ignore')
+            
+            # Sort by Employee Code then Date to match screenshot
+            export_df = export_df.sort_values(by=['Emp_Code', 'Date'])
+            
+            # Select columns in requested order
+            output_df = export_df[['Emp_Code', 'Emp_Name', 'Hours', 'Project_Code', 'Project_Name', 'Phase', 'Date']]
+            
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                output_df.to_excel(writer, index=False, sheet_name='Timesheets')
+                
+                # Remove default pandas header styling (bold, borders)
+                worksheet = writer.sheets['Timesheets']
+                for cell in worksheet[1]:
+                    if cell.font:
+                        cell.font = openpyxl.styles.Font(bold=False)
+                    if cell.border:
+                        cell.border = openpyxl.styles.Border()
+            
+            st.download_button(
+                label="📥 Export Excel", 
+                data=buffer.getvalue(), 
+                file_name="timesheet_export.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                use_container_width=True
+            )
     # Pagination & Table
     rows_per_page = 10
     if not data.empty:
