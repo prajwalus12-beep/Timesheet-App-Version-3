@@ -9,14 +9,6 @@ def render_sidebar(user):
     # --- Sidebar custom CSS ---
     st.sidebar.markdown("""
     <style>
-    /* Sidebar - white background */
-    [data-testid="stSidebar"] {
-        background-color: #ffffff;
-    }
-    [data-testid="stSidebar"] > div:first-child {
-        background-color: #ffffff;
-    }
-
     /* Brand header */
     .sidebar-brand {
         display: flex;
@@ -32,7 +24,7 @@ def render_sidebar(user):
         font-size: 22px; color: white; flex-shrink: 0;
     }
     .sidebar-brand-text {
-        font-size: 22px; font-weight: 700; color: #1e293b;
+        font-size: 22px; font-weight: 700; color: var(--text-color);
     }
 
     /* Style radio buttons as nav items */
@@ -55,7 +47,8 @@ def render_sidebar(user):
         cursor: pointer !important;
         font-size: 15px !important;
         font-weight: 500 !important;
-        color: #475569 !important;
+        color: var(--text-color) !important;
+        opacity: 0.9;
         background: transparent !important;
         border: none !important;
         transition: background 0.15s !important;
@@ -68,13 +61,14 @@ def render_sidebar(user):
         width: 100% !important;
     }
     [data-testid="stSidebar"] .stRadio > div > label:hover {
-        background: #f1f5f9 !important;
+        background: rgba(128, 128, 128, 0.1) !important;
     }
     [data-testid="stSidebar"] .stRadio > div > label[data-checked="true"],
     [data-testid="stSidebar"] .stRadio > div > label:has(input:checked) {
-        background: #EFF6FF !important;
+        background: rgba(37, 99, 235, 0.1) !important;
         color: #2563EB !important;
         font-weight: 600 !important;
+        opacity: 1;
         border-left: 3px solid #2563EB !important;
     }
     /* Hide radio circle */
@@ -88,7 +82,7 @@ def render_sidebar(user):
 
     /* User card */
     .user-card-container {
-        background: #f8fafc;
+        background: rgba(128, 128, 128, 0.05);
         border-radius: 12px;
         padding: 14px 12px;
         margin: 8px 0 10px 0;
@@ -103,19 +97,19 @@ def render_sidebar(user):
         flex-shrink: 0;
     }
     .user-info { line-height: 1.3; }
-    .user-name { font-weight: 600; font-size: 14px; color: #1e293b; }
-    .user-role { font-size: 12px; color: #94a3b8; }
+    .user-name { font-weight: 600; font-size: 14px; color: var(--text-color); }
+    .user-role { font-size: 12px; color: var(--text-color); opacity: 0.7; }
 
     /* Style the popover for profile card */
     [data-testid="stSidebar"] [data-testid="stPopover"] > button {
-        background: #f8fafc !important;
+        background: rgba(128, 128, 128, 0.05) !important;
         border: none !important;
         border-radius: 12px !important;
         padding: 0 !important;
         width: 100% !important;
     }
     [data-testid="stSidebar"] [data-testid="stPopover"] > button:hover {
-        background: #f1f5f9 !important;
+        background: rgba(128, 128, 128, 0.1) !important;
     }
     </style>
     """, unsafe_allow_html=True)
