@@ -3,15 +3,59 @@ import random
 import time
 from database.queries import get_all_users
 from services.auth_service import login_user
-from utils.captcha_generator import generate_captcha_image
 
 
 def _new_captcha():
-    """Generate a new CAPTCHA code and its image, store in session state."""
+    """Generate a new CAPTCHA code and store in session state."""
     chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     code = "".join(random.choices(chars, k=6))
     st.session_state.captcha_code = code
-    st.session_state.captcha_image = generate_captcha_image(code)
+
+
+def _render_captcha_text(code: str):
+    """Render the CAPTCHA code as styled HTML text."""
+    # Generate random colors for each character
+    colored_chars = ""
+    for ch in code:
+        r = random.randint(30, 150)
+        g = random.randint(30, 150)
+        b = random.randint(30, 150)
+        rotation = random.randint(-12, 12)
+        size = random.randint(28, 36)
+        colored_chars += (
+            f'<span style="color:rgb({r},{g},{b}); '
+            f'display:inline-block; transform:rotate({rotation}deg); '
+            f'font-size:{size}px; font-weight:bold; '
+            f'margin:0 2px;">{ch}</span>'
+        )
+
+    captcha_html = f"""
+    <div style="
+        background: linear-gradient(135deg, #e8e8e8 25%, #f5f5f5 50%, #e0e0e0 75%);
+        border: 2px solid #bbb;
+        border-radius: 8px;
+        padding: 14px 20px;
+        text-align: center;
+        font-family: 'Courier New', Courier, monospace;
+        letter-spacing: 10px;
+        user-select: none;
+        position: relative;
+        overflow: hidden;
+    ">
+        <div style="
+            position: absolute; top: 50%; left: 0; right: 0;
+            border-top: 2px solid rgba(150,150,150,0.4);
+            transform: rotate(-3deg);
+        "></div>
+        <div style="
+            position: absolute; top: 35%; left: 0; right: 0;
+            border-top: 1px dashed rgba(120,120,120,0.3);
+            transform: rotate(2deg);
+        "></div>
+        {colored_chars}
+    </div>
+    """
+    st.markdown(captcha_html, unsafe_allow_html=True)
 
 
 def render_login_page():
@@ -30,13 +74,13 @@ def render_login_page():
 
             username = st.selectbox("Username", username_list, on_change=on_user_change)
 
-            # --- Image CAPTCHA ---
+            # --- Text CAPTCHA ---
             if "captcha_code" not in st.session_state:
                 _new_captcha()
 
             cap_col1, cap_col2 = st.columns([4, 1])
             with cap_col1:
-                st.image(st.session_state.captcha_image, width="content")
+                _render_captcha_text(st.session_state.captcha_code)
             with cap_col2:
                 if st.button("🔄", help="Refresh Captcha", key="refresh_captcha"):
                     _new_captcha()
@@ -68,8 +112,6 @@ def render_login_page():
                             st.session_state["user"] = res
                             if "captcha_code" in st.session_state:
                                 del st.session_state["captcha_code"]
-                            if "captcha_image" in st.session_state:
-                                del st.session_state["captcha_image"]
                             st.success("Login Successful!")
                             time.sleep(1)
                             st.rerun()
