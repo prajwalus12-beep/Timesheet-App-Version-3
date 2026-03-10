@@ -72,8 +72,8 @@ header {
     border-bottom: 1px solid #f1f5f9;
     display: flex !important;
     align-items: center !important;
-    height: 30px;
-    min-height: 30px;
+    height: 12px;
+    min-height: 12px;
     margin: 0 !important;
     padding: 0 !important;
 }
