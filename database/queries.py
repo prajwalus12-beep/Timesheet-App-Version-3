@@ -331,7 +331,7 @@ def import_employees(df):
                 "slack_id": slack_id
             })
             
-            username = emp_name.lower().replace(" ", ".")
+            username = ".".join(emp_name.strip().lower().split())
             enc_pwd = encrypt_data(FIXED_PASSWORD)
             user_data.append({
                 "employee_id": emp_id,
