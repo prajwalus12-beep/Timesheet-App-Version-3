@@ -24,7 +24,7 @@ def render_navbar(user):
                  
     with col_user:
         with st.popover("👤", use_container_width=True):
-            st.markdown(f"**{user['username']}**")
+            st.markdown(f"**{user['username'].title()}**")
             if st.button("Update Password", use_container_width=True):
                 update_password_dialog(user["username"])
             if st.button("🚪 Logout", key="logout_btn", use_container_width=True):

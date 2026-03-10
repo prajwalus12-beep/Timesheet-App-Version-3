@@ -73,7 +73,7 @@ def render_login_page():
                     st.session_state["login_password"] = ""
 
             def format_username(uname):
-                return uname.replace(".", " ").title() if "." in uname else uname.title()
+                return uname.title()
 
             username = st.selectbox(
                 "Username", 

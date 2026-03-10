@@ -43,9 +43,9 @@ def render_timesheet_page(user):
         # Dynamic ratios to minimize space when Custom Range is not active
         date_range_preset = st.session_state.get('date_range_preset', 'This Week')
         if date_range_preset == "Custom Range":
-            ratios = [2, 2.5, 2, 2, 0.8]
+            ratios = [1.5, 2.7, 2.3, 2.3, 1.2]
         else:
-            ratios = [2, 0.1, 2, 2, 0.8]
+            ratios = [2.5, 0.1, 3.0, 3.0, 1.4]
             
         col_preset, col_custom, col_emp, col_proj, col_clear = st.columns(ratios)
         

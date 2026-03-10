@@ -162,7 +162,7 @@ def render_sidebar(user):
         username = user["username"]
         initials = username[:2].upper()
         role_label = "System Admin" if user["role"] == "admin" else "Employee"
-        display_name = username.replace(".", " ").title() if "." in username else username.title()
+        display_name = username.title()
 
         with st.popover(f"""**{display_name}**  \n{role_label}""", use_container_width=True):
             if st.button("⚙️  Change Password", use_container_width=True, key="sidebar_update_pwd"):
