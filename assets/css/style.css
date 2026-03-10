@@ -5,23 +5,27 @@
 
 /* Hide Streamlit default UI elements */
 #MainMenu {
-    visibility: hidden;
+    visibility: hidden !important;
 }
 
 footer {
-    visibility: hidden;
+    visibility: hidden !important;
 }
 
 header {
-    visibility: hidden;
+    background: transparent !important;
 }
 
 [data-testid="stToolbar"] {
-    display: none;
+    visibility: hidden !important;
+}
+
+.stDeployButton {
+    display: none !important;
 }
 
 [data-testid="stDecoration"] {
-    display: none;
+    display: none !important;
 }
 
 [data-testid="stStatusWidget"] {

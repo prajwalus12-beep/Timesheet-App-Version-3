@@ -36,6 +36,19 @@ if not user:
     """, unsafe_allow_html=True)
     render_login_page()
 else:
+    # Ensure sidebar toggle button is visible when logged in (overriding login page CSS)
+    st.markdown("""
+        <style>
+            [data-testid="collapsedControl"],
+            button[kind="headerNoPadding"] { 
+                display: flex !important; 
+                visibility: visible !important;
+                opacity: 1 !important;
+                z-index: 999999 !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     # 5. Routing
     if "page" not in st.session_state:
         st.session_state["page"] = "Timesheet Entries"
