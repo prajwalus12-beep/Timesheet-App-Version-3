@@ -3,6 +3,39 @@
     background-color: #f8fafc;
 }
 
+/* Hide Streamlit default UI elements */
+#MainMenu {
+    visibility: hidden;
+}
+
+footer {
+    visibility: hidden;
+}
+
+header {
+    visibility: hidden;
+}
+
+[data-testid="stToolbar"] {
+    display: none;
+}
+
+[data-testid="stDecoration"] {
+    display: none;
+}
+
+[data-testid="stStatusWidget"] {
+    display: none;
+}
+
+.viewerBadge_container__r5tak {
+    display: none;
+}
+
+.stDeployButton {
+    display: none !important;
+}
+
 /* Table Container Styling */
 .table-container {
     background: white;
