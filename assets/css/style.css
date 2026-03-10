@@ -92,14 +92,18 @@ div[data-testid="stHorizontalBlock"] {
 }
 
 .stButton>button[kind="primary"],
-.stFormSubmitButton>button {
+.stFormSubmitButton>button,
+[data-testid="stDownloadButton"] button[kind="primary"],
+button[kind="primary"] {
     background-color: #2563EB !important;
     color: white !important;
     border: none !important;
 }
 
 .stButton>button[kind="primary"]:hover,
-.stFormSubmitButton>button:hover {
+.stFormSubmitButton>button:hover,
+[data-testid="stDownloadButton"] button[kind="primary"]:hover,
+button[kind="primary"]:hover {
     background-color: #1D4ED8 !important;
 }
 

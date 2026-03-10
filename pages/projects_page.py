@@ -9,7 +9,7 @@ def render_projects_page():
     projs = get_all_projects()
     with col_export:
         if not projs.empty:
-            st.download_button("📥 Export CSV", projs.to_csv(index=False), f"projects_{datetime.date.today()}.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 Export CSV", projs.to_csv(index=False), f"projects_{datetime.date.today()}.csv", "text/csv", use_container_width=True, type="primary")
     
     st.write("### 🏗️ Project List")
     if not projs.empty:

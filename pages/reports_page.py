@@ -162,7 +162,8 @@ def render_reports_page(user):
                 "report.csv", 
                 "text/csv", 
                 use_container_width=True,
-                key="report_csv_download_btn"
+                key="report_csv_download_btn",
+                type="primary"
             )
             
             # JSON Export for Admin: Incomplete Timesheets
@@ -198,6 +199,7 @@ def render_reports_page(user):
                         "incomplete_timesheets.json", 
                         "application/json",
                         use_container_width=True,
-                        key="report_json_download_btn"
+                        key="report_json_download_btn",
+                        type="primary"
                     )
     else: st.info("No employees found.")

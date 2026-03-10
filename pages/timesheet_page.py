@@ -17,10 +17,14 @@ def render_timesheet_page(user):
     current_emp_id = user.get("employee_id")
     emp_labels = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in emps.iterrows()}
 
+    current_emp_name_label = next((k for k, v in emp_labels.items() if v == current_emp_id), "All")
+    is_admin = user.get("role") == "admin"
+    default_emp_filter = "All" if is_admin else current_emp_name_label
+
     # Handle reset flag BEFORE widgets are instantiated
     if st.session_state.pop('_reset_filters', False):
         st.session_state.date_range_preset = "This Week"
-        st.session_state.filter_emp = next((k for k, v in emp_labels.items() if v == current_emp_id), "All")
+        st.session_state.filter_emp = default_emp_filter
         st.session_state.filter_proj = "All"
 
     # Initialize filters
@@ -31,7 +35,7 @@ def render_timesheet_page(user):
     if 'date_range_preset' not in st.session_state:
         st.session_state.date_range_preset = "This Week"
     if 'filter_emp' not in st.session_state:
-        st.session_state.filter_emp = next((k for k, v in emp_labels.items() if v == current_emp_id), "All")
+        st.session_state.filter_emp = default_emp_filter
     if 'filter_proj' not in st.session_state:
         st.session_state.filter_proj = "All"
 
@@ -68,8 +72,14 @@ def render_timesheet_page(user):
                 start_date, end_date = calc_start, calc_end
 
         with col_emp:
-            selected_emp_name = st.selectbox("Employee", ["All"] + list(emp_labels.keys()), key="filter_emp")
-            selected_emp_id = emp_labels[selected_emp_name] if selected_emp_name != "All" else None
+            if is_admin:
+                emp_options = ["All"] + list(emp_labels.keys())
+                selected_emp_name = st.selectbox("Employee", emp_options, key="filter_emp")
+            else:
+                emp_options = [current_emp_name_label]
+                selected_emp_name = st.selectbox("Employee", emp_options, disabled=True, key="filter_emp")
+            
+            selected_emp_id = emp_labels.get(selected_emp_name) if selected_emp_name != "All" else None
 
         with col_proj:
             all_projs = get_all_projects()
@@ -137,7 +147,8 @@ def render_timesheet_page(user):
                 data=buffer.getvalue(), 
                 file_name="timesheet_export.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                use_container_width=True
+                use_container_width=True,
+                type="primary"
             )
     # Pagination & Table
     rows_per_page = 10
