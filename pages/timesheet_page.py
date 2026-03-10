@@ -70,6 +70,9 @@ def render_timesheet_page(user):
                 sub1, sub2 = st.columns(2)
                 start_date = sub1.date_input("Start", key="start_date")
                 end_date = sub2.date_input("End", key="end_date")
+                if end_date < start_date:
+                    st.error("⚠️ End date can't be smaller than start date")
+                    st.stop()
             else:
                 start_date, end_date = calc_start, calc_end
 

@@ -11,17 +11,32 @@ def render_reports_page(user):
     with hdr_col:
         st.subheader("Timesheet Reports", divider="blue")
         st.caption("Employee timesheet summary and statistics")
-    exp_btn_placeholder = exp_col.empty()
-
     # Handle reset flag BEFORE widgets are instantiated
     if st.session_state.pop('_reset_report_filters', False):
         st.session_state.report_emp = "All Employees"
         st.session_state.report_proj = "All Projects"
         st.session_state.report_date_range_picker = "This Week"
+        st.session_state.report_start_date = datetime.date.today() - datetime.timedelta(days=30)
+        st.session_state.report_end_date = datetime.date.today()
 
+    exp_btn_placeholder = exp_col.empty()
+
+    # Initialize custom dates if not present
+    if 'report_start_date' not in st.session_state:
+        st.session_state.report_start_date = datetime.date.today() - datetime.timedelta(days=30)
+    if 'report_end_date' not in st.session_state:
+        st.session_state.report_end_date = datetime.date.today()
+
+    range_opt = st.session_state.get('report_date_range_picker', 'This Week')
+    
     with st.container(border=True):
-        # Balanced layout with minimal spacing
-        c1, c2, c3, c_space, c4 = st.columns([2.5, 2.5, 2.5, 0.1, 1.2])
+        # Dynamic ratios to accommodate Custom Range inputs - giving more space to Clear button
+        if range_opt == "Custom Range":
+            ratios = [1.8, 1.8, 1.8, 3.4, 1.2]
+        else:
+            ratios = [2.5, 2.5, 2.5, 0.1, 1.2]
+        
+        c1, c2, c3, c4, c5 = st.columns(ratios)
         
         with c1:
             report_emps = get_all_employees(exclude_admin=True)
@@ -36,17 +51,32 @@ def render_reports_page(user):
             sel_proj_code = proj_options[sel_proj_name] if sel_proj_name != "All Projects" else None
             
         with c3:
-            range_opt = st.selectbox("Date Range", ["This Week", "Last Week", "Current 4 Week Cycle", "Previous 4 Week Cycle"], key="report_date_range_picker")
+            range_opt = st.selectbox("Date Range", ["This Week", "Last Week", "Current 4 Week Cycle", "Previous 4 Week Cycle", "Custom Range"], key="report_date_range_picker")
             today = datetime.date.today()
             start_week = today - datetime.timedelta(days=today.weekday())
-            if range_opt == "This Week": r_start, r_end = start_week, start_week + datetime.timedelta(days=6)
-            elif range_opt == "Last Week": r_start, r_end = start_week - datetime.timedelta(days=7), start_week - datetime.timedelta(days=1)
-            elif range_opt == "Current 4 Week Cycle": r_start, r_end = get_curr_cycle_dates(today)
-            else:
+            
+            if range_opt == "This Week": r_start_calc, r_end_calc = start_week, start_week + datetime.timedelta(days=6)
+            elif range_opt == "Last Week": r_start_calc, r_end_calc = start_week - datetime.timedelta(days=7), start_week - datetime.timedelta(days=1)
+            elif range_opt == "Current 4 Week Cycle": r_start_calc, r_end_calc = get_curr_cycle_dates(today)
+            elif range_opt == "Previous 4 Week Cycle":
                 cs, _ = get_curr_cycle_dates(today)
-                r_start, r_end = cs - datetime.timedelta(days=28), cs - datetime.timedelta(days=1)
+                r_start_calc, r_end_calc = cs - datetime.timedelta(days=28), cs - datetime.timedelta(days=1)
+            else:
+                r_start_calc, r_end_calc = None, None
         
         with c4:
+            st.markdown('<div class="filter-label-phantom">&nbsp;</div>', unsafe_allow_html=True)
+            if range_opt == "Custom Range":
+                sub1, sub2 = st.columns(2)
+                r_start = sub1.date_input("Start", key="report_start_date")
+                r_end = sub2.date_input("End", key="report_end_date")
+                if r_end < r_start:
+                    st.error("⚠️ End date can't be smaller than start date")
+                    st.stop()
+            else:
+                r_start, r_end = r_start_calc, r_end_calc
+        
+        with c5:
             st.markdown('<div class="filter-label-phantom">&nbsp;</div>', unsafe_allow_html=True)
             if st.button("🧹 Clear", key="clear_report_filters_btn", use_container_width=True):
                 st.session_state._reset_report_filters = True
