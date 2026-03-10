@@ -1,6 +1,15 @@
 import streamlit as st
 import pandas as pd
+import io
 from database.queries import import_employees, import_projects, import_assignments
+
+def read_csv_safe(uploaded_file):
+    """Read CSV with encoding fallback (UTF-8 -> cp1252)."""
+    try:
+        return pd.read_csv(uploaded_file)
+    except UnicodeDecodeError:
+        uploaded_file.seek(0)
+        return pd.read_csv(uploaded_file, encoding='cp1252')
 
 def render_import_page():
     st.subheader("Import Data", divider="blue")
@@ -11,7 +20,7 @@ def render_import_page():
         st.write("### 👥 Employees")
         uploaded_file = st.file_uploader("Upload Employees CSV", type="csv", key="emp_csv")
         if uploaded_file:
-            df = pd.read_csv(uploaded_file)
+            df = read_csv_safe(uploaded_file)
             if st.button("Import Employees", type="primary"):
                 success, msg = import_employees(df)
                 st.success(msg) if success else st.error(msg)
@@ -26,7 +35,7 @@ def render_import_page():
         st.write("### 🏗️ Projects")
         uploaded_file = st.file_uploader("Upload Projects CSV", type="csv", key="proj_csv")
         if uploaded_file:
-            df = pd.read_csv(uploaded_file)
+            df = read_csv_safe(uploaded_file)
             if st.button("Import Projects", type="primary"):
                 success, msg = import_projects(df)
                 st.success(msg) if success else st.error(msg)
@@ -41,7 +50,7 @@ def render_import_page():
         st.write("### 🔗 Assignments")
         uploaded_file = st.file_uploader("Upload Assignments CSV", type="csv", key="assign_csv")
         if uploaded_file:
-            df = pd.read_csv(uploaded_file)
+            df = read_csv_safe(uploaded_file)
             if st.button("Import Assignments", type="primary"):
                 success, msg = import_assignments(df)
                 st.success(msg) if success else st.error(msg)
