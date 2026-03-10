@@ -13,6 +13,12 @@ def render_reports_page(user):
         st.caption("Employee timesheet summary and statistics")
     exp_btn_placeholder = exp_col.empty()
 
+    # Handle reset flag BEFORE widgets are instantiated
+    if st.session_state.pop('_reset_report_filters', False):
+        st.session_state.report_emp = "All Employees"
+        st.session_state.report_proj = "All Projects"
+        st.session_state.report_date_range_picker = "This Week"
+
     with st.container(border=True):
         # Balanced layout with minimal spacing
         c1, c2, c3, c_space, c4 = st.columns([2.5, 2.5, 2.5, 0.1, 1.2])
@@ -43,9 +49,7 @@ def render_reports_page(user):
         with c4:
             st.markdown('<div class="filter-label-phantom">&nbsp;</div>', unsafe_allow_html=True)
             if st.button("🧹 Clear", key="clear_report_filters_btn", use_container_width=True):
-                st.session_state.report_emp = "All Employees"
-                st.session_state.report_proj = "All Projects"
-                st.session_state.report_date_range_picker = "This Week"
+                st.session_state._reset_report_filters = True
                 st.rerun()
 
     all_employees = get_all_employees(exclude_admin=True)

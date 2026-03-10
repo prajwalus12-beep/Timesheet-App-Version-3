@@ -58,6 +58,8 @@ def render_timesheet_page(user):
                 calc_start, calc_end = start_of_this_week, start_of_this_week + datetime.timedelta(days=6)
             elif date_range_option == "Last Week":
                 calc_start, calc_end = start_of_this_week - datetime.timedelta(days=7), start_of_this_week - datetime.timedelta(days=1)
+            elif date_range_option == "Current 4 Week Cycle":
+                calc_start, calc_end = get_curr_cycle_dates(today)
             elif date_range_option == "Previous 4 Week Cycle":
                 curr_start, _ = get_curr_cycle_dates(today)
                 calc_start, calc_end = curr_start - datetime.timedelta(days=28), curr_start - datetime.timedelta(days=1)
