@@ -87,22 +87,33 @@ def login_user(username, password):
     user_record = get_user_by_username(username)
     if user_record:
         uid, emp_id, uname, db_pw, failed, locked_until = user_record
+        
+        # Convert string timestamp to datetime object if needed
+        if isinstance(locked_until, str):
+            try:
+                # Handle potential formats: '2026-03-11 04:11:08.018048' or ISO format
+                if ' ' in locked_until:
+                    locked_until = datetime.strptime(locked_until.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                else:
+                    locked_until = datetime.fromisoformat(locked_until)
+            except:
+                locked_until = None
+
         if locked_until and datetime.now() < locked_until:
             wait = int((locked_until - datetime.now()).total_seconds() / 60) + 1
-            return {"error": f"Account locked. Try in {wait} min."}
+            return {"error": f"⚠️ Account locked for security. Please try again in {wait} min."}
         
         if verify_password(password, db_pw):
             if failed > 0: update_user_lockout(username, 0, None)
-            # Removed automatic re-hashing to preserve admin visibility
             return {"id": uid, "employee_id": emp_id, "username": uname, 
                     "role": "admin" if uname in ["admin", "System Administrator"] else "employee"}
         else:
             new_failed = failed + 1
             lockout = datetime.now() + timedelta(minutes=15) if new_failed >= 5 else None
             update_user_lockout(username, new_failed, lockout)
-            if lockout: return {"error": "Too many failed attempts. Locked for 15 min."}
-            return {"error": f"Invalid password. Attempt {new_failed}/5."}
-    return {"error": "User not found."}
+            if lockout: return {"error": "🚫 Too many failed attempts. Your account is locked for 15 minutes."}
+            return {"error": f"❌ Invalid password. Attempt {new_failed}/5."}
+    return {"error": "🔍 User not found."}
 
 def create_session_token(user_data):
     """Create an encrypted session token from user data."""
