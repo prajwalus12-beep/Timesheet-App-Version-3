@@ -99,8 +99,8 @@ def login_user(username, password):
             except:
                 locked_until = None
 
-        if locked_until and datetime.now() < locked_until:
-            wait = int((locked_until - datetime.now()).total_seconds() / 60) + 1
+        if locked_until and datetime.utcnow() < locked_until:
+            wait = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
             return {"error": f"⚠️ Account locked for security. Please try again in {wait} min."}
         
         if verify_password(password, db_pw):
@@ -109,7 +109,7 @@ def login_user(username, password):
                     "role": "admin" if uname in ["admin", "System Administrator"] else "employee"}
         else:
             new_failed = failed + 1
-            lockout = datetime.now() + timedelta(minutes=15) if new_failed >= 5 else None
+            lockout = datetime.utcnow() + timedelta(minutes=15) if new_failed >= 5 else None
             update_user_lockout(username, new_failed, lockout)
             if lockout: return {"error": "🚫 Too many failed attempts. Your account is locked for 15 minutes."}
             return {"error": f"❌ Invalid password. Attempt {new_failed}/5."}
