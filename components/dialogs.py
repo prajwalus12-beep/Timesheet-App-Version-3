@@ -37,7 +37,8 @@ def update_password_dialog(username):
 
 @st.dialog("Add New Entry")
 def entry_form_dialog(user, emp_options, current_emp_id):
-    filter_type = st.radio("Project Status", ["Inprogress", "Complete"], horizontal=True, key="entry_filter_type_modal")
+    filter_type = st.radio("Project Status", ["Incomplete", "Complete"], horizontal=True, key="entry_filter_type_modal")
+    search_query = st.text_input("Search Project", "", key="entry_search_modal", placeholder="Search by name or code...")
     
     with st.form("add_time_form"):
         user_option_key = next((k for k, v in emp_options.items() if v == current_emp_id), None)
@@ -54,9 +55,29 @@ def entry_form_dialog(user, emp_options, current_emp_id):
             entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, value=4.0, step=1.0, key="entry_hours_modal")
         
         all_projects_df = get_all_projects()
-        filtered_projs = all_projects_df[all_projects_df['status'] == 'Complete'] if filter_type == "Complete" else all_projects_df[all_projects_df['status'] != 'Complete']
+        
+        # Filter by status
+        if filter_type == "Complete":
+            filtered_projs = all_projects_df[all_projects_df['status'] == 'Complete']
+        else:
+            filtered_projs = all_projects_df[all_projects_df['status'] != 'Complete']
             
-        form_proj_options = {f"{r['project_code']} - {r['project_name']}": (r['project_code'], r['project_name'], r.get('status', '')) for _, r in filtered_projs.iterrows()}
+        # Filter by search query
+        if search_query:
+            q = search_query.lower()
+            filtered_projs = filtered_projs[
+                filtered_projs['project_code'].str.lower().str.contains(q, na=False) | 
+                filtered_projs['project_name'].str.lower().str.contains(q, na=False)
+            ]
+        
+        # Limit to 20
+        display_projs = filtered_projs.head(20)
+        count = len(display_projs)
+        status_label = filter_type.upper()
+        
+        st.markdown(f"<p style='color: #4A90E2; font-size: 12px; font-weight: bold; margin-bottom: -10px;'>SEARCHING {count} {status_label} PROJECTS</p>", unsafe_allow_html=True)
+            
+        form_proj_options = {f"{r['project_code']} - {r['project_name']}": (r['project_code'], r['project_name'], r.get('status', '')) for _, r in display_projs.iterrows()}
         proj_keys = list(form_proj_options.keys())
         entry_proj_key = st.selectbox("Project", ["None"] + proj_keys, key="entry_proj_modal")
         
@@ -75,6 +96,9 @@ def entry_form_dialog(user, emp_options, current_emp_id):
                 st.rerun()
             elif entry_proj_key == "None": st.warning("Please select a project.")
             else: st.warning("Please enter valid hours.")
+            
+    # Add enough space at the bottom to ensure the dropdown opens downwards without making the dialog excessively tall
+    st.markdown("<div style='height: 300px;'></div>", unsafe_allow_html=True)
 
 @st.dialog("Edit Entry")
 def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):

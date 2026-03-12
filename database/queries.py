@@ -22,7 +22,7 @@ def get_all_projects():
     supabase = get_supabase_client()
     if not supabase: return pd.DataFrame(columns=['project_code', 'project_name', 'status'])
     
-    res = supabase.table('project').select('project_code, project_name, status').order('project_code').execute()
+    res = supabase.table('project').select('project_code, project_name, status').order('project_code', desc=True).execute()
     data = res.data or []
     
     # Decrypt project names
