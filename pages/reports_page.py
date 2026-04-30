@@ -2,7 +2,8 @@ import streamlit as st
 import datetime
 import pandas as pd
 import json
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode, JsCode
+import io
+
 from database.queries import get_all_employees, get_timesheets, get_all_projects
 from utils.date_helpers import get_curr_cycle_dates
 
@@ -46,6 +47,9 @@ def render_reports_page(user):
         
         with c2:
             all_projs = get_all_projects()
+            all_projs['job_no_numeric'] = pd.to_numeric(all_projs['project_code'], errors='coerce')
+            all_projs = all_projs.sort_values(by=['job_no_numeric', 'project_code'], ascending=[False, False])
+            
             proj_options = {f"{r['project_code']} - {r['project_name']}": r['project_code'] for _, r in all_projs.iterrows()}
             sel_proj_name = st.selectbox("Project", ["All Projects"] + list(proj_options.keys()), key="report_proj")
             sel_proj_code = proj_options[sel_proj_name] if sel_proj_name != "All Projects" else None
@@ -109,15 +113,18 @@ def render_reports_page(user):
             wt, df = 0.0, 0
             for d, c_name in zip(all_dates, day_cols):
                 h = hours.get(d, 0.0)
-                r_dict[c_name] = h if h > 0 else None
+                if h > 0:
+                    r_dict[c_name] = int(h) if float(h).is_integer() else round(h, 2)
+                else:
+                    r_dict[c_name] = None
                 if d.weekday() < 5:
                     wt += h
                     if h > 0: df += 1
-            r_dict['Total Hours'] = wt
+            r_dict['Total Hours'] = int(wt) if float(wt).is_integer() else round(wt, 2)
             r_dict['Status'] = '✅' if len(all_weekdays) > 0 and df == len(all_weekdays) else '❌'
             pivot_rows.append(r_dict)
 
-        df_pivot = pd.DataFrame(pivot_rows)
+        df_pivot = pd.DataFrame(pivot_rows, dtype=object)
         
         # Calculate Metrics
         total_emps = len(df_pivot)
@@ -134,106 +141,146 @@ def render_reports_page(user):
         
         st.write("### 📋 Employee Details")
         st.caption(f"Showing records from :blue[**{r_start.strftime('%d-%m-%Y')}**] to :blue[**{r_end.strftime('%d-%m-%Y')}**]")
-        gb = GridOptionsBuilder.from_dataframe(df_pivot)
-        gb.configure_default_column(sortable=False, filterable=False, resizable=True)
-        
-        # Row style: highlight uncompleted rows in pink
-        row_style_jscode = JsCode("""
-        function(params) {
-            if (params.data && params.data['Status'] && params.data['Status'].indexOf('\u274c') !== -1) {
-                return {backgroundColor: '#ffe4e6', color: '#991b1b'};
-            }
-            return {};
-        }
-        """)
+        def style_table(styler):
+            # Row style for uncompleted rows
+            def row_style(row):
+                if '\u274c' in str(row.get('Status', '')) or '❌' in str(row.get('Status', '')):
+                    return ['background-color: #ffe4e6; color: #991b1b'] * len(row)
+                return [''] * len(row)
+            
+            styler = styler.apply(row_style, axis=1)
+            
+            # Weekend styling
+            weekend_cols = [c for c in day_cols if 'SAT' in c or 'SUN' in c]
+            def weekend_style(val):
+                if pd.notna(val) and val != 0 and str(val).strip() != '':
+                    return 'background-color: #fefce8; color: #78350f; font-weight: bold'
+                return ''
+            
+            if weekend_cols:
+                styler = styler.map(weekend_style, subset=weekend_cols)
+                
+            return styler
 
-        # Weekend cell style: light yellow only when value exists
-        weekend_cell_style = JsCode("""
-        function(params) {
-            if (params.value !== null && params.value !== undefined && params.value !== 0) {
-                return {backgroundColor: '#fefce8', color: '#78350f', fontWeight: 'bold'};
-            }
-            return {};
-        }
-        """)
-
-        gb.configure_column("EMP Id", pinned='left', width=90, suppressSizeToFit=True)
-        gb.configure_column("Employee Name", sortable=True, pinned='left', width=200, suppressSizeToFit=True)
-
-        for col in day_cols:
-            if 'SAT' in col or 'SUN' in col:
-                gb.configure_column(col, width=100, cellStyle=weekend_cell_style)
-            else:
-                gb.configure_column(col, width=100)
-
-        gb.configure_column("Total Hours", width=120)
-        gb.configure_column("Status", width=120)
-        gb.configure_grid_options(getRowStyle=row_style_jscode)
-
-        grid_opts = gb.build()
-        
-        # Suppress the filter/menu icon from all column headers
-        grid_opts['defaultColDef']['suppressMenu'] = True
-        for col_def in grid_opts.get('columnDefs', []):
-            col_def['suppressMenu'] = True
-        
-        AgGrid(
-            df_pivot, 
-            gridOptions=grid_opts, 
-            height=500, 
-            theme='alpine',
-            allow_unsafe_jscode=True,
-            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-            update_mode=GridUpdateMode.MODEL_CHANGED
-        )
+        styled_df = df_pivot.style.pipe(style_table)
+        st.dataframe(styled_df, use_container_width=True, height=500, hide_index=True)
         
         
         # Export buttons
         with exp_btn_placeholder.container():
-            st.download_button(
-                "📥 Export CSV", 
-                df_pivot.to_csv(index=False), 
-                "report.csv", 
-                "text/csv", 
-                use_container_width=True,
-                key="report_csv_download_btn",
-                type="primary"
-            )
-            
-            # JSON Export for Admin: Incomplete Timesheets
-            if user["role"] == "admin":
-                incomplete_logs = []
+            with st.popover("📥 Export Options", use_container_width=True):
+                excel_export = df_pivot.copy()
+                if 'Status' in excel_export.columns:
+                    excel_export['Status'] = excel_export['Status'].replace({'✅': 'Complete', '❌': 'Incomplete'})
                 
-                for _, emp in all_employees.iterrows():
-                    eid, ename, slack_id = emp['employee_id'], emp['employee_name'], emp.get('slack_id', '-')
-                    if eid == 'admin': continue
-                    
-                    emp_hours_map = emp_day_hours.get(eid, {})
-                    # Identify all incomplete days (h < 8) in the selected range
-                    incomplete_dates = []
-                    for d in all_dates:
-                        if d.weekday() >= 5: continue # Skip Weekends (Sat=5, Sun=6)
-                        h = emp_hours_map.get(d, 0.0)
-                        if h < 8.0:
-                            incomplete_dates.append(d.strftime('%d-%m-%Y'))
-                    
-                    if incomplete_dates:
-                        dates_str = ", ".join(incomplete_dates)
-                        msg = f"Hello {ename}, you have incomplete timesheet entries for following dates: {dates_str}. Please complete your timesheet."
-                        
-                        incomplete_logs.append({
-                            "Slack Id": slack_id,
-                            "Message": msg
-                        })
+                sum_buffer = io.BytesIO()
+                with pd.ExcelWriter(sum_buffer, engine='openpyxl') as writer:
+                    if not excel_export.empty:
+                        excel_export.to_excel(writer, sheet_name='Summary', index=False)
+                    else:
+                        pd.DataFrame().to_excel(writer, sheet_name='Summary', index=False)
                 
-                if incomplete_logs:
-                    st.download_button(
-                        "📥 Export JSON (Incomplete)", 
-                        json.dumps(incomplete_logs, indent=2), 
-                        "incomplete_timesheets.json", 
-                        "application/json",
-                        use_container_width=True,
-                        key="report_json_download_btn",
-                        type="primary"
+                st.download_button(
+                    "📊 Export Summary (Excel)", 
+                    sum_buffer.getvalue(), 
+                    f"report_summary_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                    use_container_width=True,
+                    key="report_excel_summary_download_btn"
+                )
+                
+                # Excel export for Phase Breakdown
+                buffer = io.BytesIO()
+                if not ts_data.empty:
+                    phase_inv_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployment", "6": "Support"}
+                    df_export = ts_data.copy()
+                    df_export['Phase'] = df_export['Phase'].astype(str).map(phase_inv_map).fillna(df_export['Phase'])
+                    df_export['hours'] = pd.to_numeric(df_export['hours'], errors='coerce').fillna(0)
+                    df_export.rename(columns={'project_name': 'Row Labels', 'Phase': 'Column Labels', 'hours': 'Sum of Hours'}, inplace=True)
+                    
+                    pivot_export = pd.pivot_table(
+                        df_export, 
+                        values='Sum of Hours', 
+                        index='Row Labels', 
+                        columns='Column Labels', 
+                        aggfunc='sum', 
+                        margins=True, 
+                        margins_name='Grand Total'
                     )
+                    
+                    # Flatten the pivot table layout to make it simple
+                    pivot_export = pivot_export.reset_index()
+                    pivot_export.columns.name = None
+                    
+                    # Fill NaN with empty space
+                    pivot_export = pivot_export.fillna('')
+                    
+                    # Remove decimals if whole number
+                    def _format_val(v):
+                        if isinstance(v, (int, float)) and pd.notna(v):
+                            return int(v) if float(v).is_integer() else round(v, 2)
+                        return v
+                    
+                    if hasattr(pivot_export, 'map'):
+                        pivot_export = pivot_export.map(_format_val)
+                    else:
+                        pivot_export = pivot_export.applymap(_format_val)
+                    
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        pivot_export.to_excel(writer, sheet_name='Sheet1', index=False)
+                        
+                        # Remove all bold styling for simple format
+                        worksheet = writer.sheets['Sheet1']
+                        for row in worksheet.iter_rows():
+                            for cell in row:
+                                if cell.font and cell.font.bold:
+                                    cell.font = cell.font.copy(bold=False)
+                else:
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        pd.DataFrame().to_excel(writer)
+                
+                st.download_button(
+                    "📈 Export By Phase (Excel)", 
+                    buffer.getvalue(), 
+                    f"report_phase_breakdown_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="report_excel_download_btn"
+                )
+
+                # JSON Export for Admin: Incomplete Timesheets
+                if user["role"] == "admin":
+                    incomplete_logs = []
+                    
+                    for _, emp in all_employees.iterrows():
+                        eid, ename, slack_id = emp['employee_id'], emp['employee_name'], emp.get('slack_id', '-')
+                        if eid == 'admin': continue
+                        
+                        emp_hours_map = emp_day_hours.get(eid, {})
+                        # Identify all incomplete days (h < 8) in the selected range
+                        incomplete_dates = []
+                        for d in all_dates:
+                            if d.weekday() >= 5: continue # Skip Weekends (Sat=5, Sun=6)
+                            h = emp_hours_map.get(d, 0.0)
+                            if h < 8.0:
+                                incomplete_dates.append(d.strftime('%d-%m-%Y'))
+                        
+                        if incomplete_dates:
+                            dates_str = ", ".join(incomplete_dates)
+                            msg = f"Hello {ename}, you have incomplete timesheet entries for following dates: {dates_str}. Please complete your timesheet."
+                            
+                            incomplete_logs.append({
+                                "Slack Id": slack_id,
+                                "Message": msg
+                            })
+                    
+                    if incomplete_logs:
+                        st.download_button(
+                            "📥 Export Incomplete Logs (JSON)", 
+                            json.dumps(incomplete_logs, indent=2), 
+                            f"incomplete_timesheets_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json", 
+                            "application/json",
+                            use_container_width=True,
+                            key="report_json_download_btn"
+                        )
     else: st.info("No employees found.")

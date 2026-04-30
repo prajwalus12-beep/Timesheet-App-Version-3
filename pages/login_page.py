@@ -66,13 +66,15 @@ def render_login_page():
     with col2:
         with st.container(border=True):
             all_users = get_all_users()
-            username_list = all_users['username'].tolist() if not all_users.empty else ["admin"]
+            username_list = ["Select Username"] + (all_users['username'].tolist() if not all_users.empty else ["admin"])
 
             def on_user_change():
                 if "login_password" in st.session_state:
                     st.session_state["login_password"] = ""
 
             def format_username(uname):
+                if uname == "Select Username":
+                    return uname
                 return uname.title()
 
             username = st.selectbox(
@@ -101,7 +103,9 @@ def render_login_page():
                 submit = st.form_submit_button("Sign In", use_container_width=True)
 
                 if submit:
-                    if captcha_input.upper() != st.session_state.captcha_code:
+                    if username == "Select Username":
+                        st.error("Please select a username.")
+                    elif captcha_input.upper() != st.session_state.captcha_code:
                         st.error("Invalid Captcha.")
                         _new_captcha()
                         time.sleep(2)

@@ -8,5 +8,5 @@ qrcode
 bcrypt
 cryptography
 pillow
-supabase
+supabase<=2.7.4
 openpyxl

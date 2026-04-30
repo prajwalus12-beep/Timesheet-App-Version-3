@@ -12,7 +12,10 @@ CREATE TABLE IF NOT EXISTS employee (
 CREATE TABLE IF NOT EXISTS project (
     project_code VARCHAR(50) PRIMARY KEY,
     project_name VARCHAR(255) NOT NULL, -- Encrypted in application logic
-    status VARCHAR(50) DEFAULT 'In progress'
+    status VARCHAR(50) DEFAULT 'In progress',
+    priority VARCHAR(50),
+    lead_engineer VARCHAR(255),
+    trello_link TEXT
 );
 
 -- 3. Users Table
@@ -61,3 +64,12 @@ INSERT INTO users (employee_id, username, password)
 VALUES ('admin', 'admin', 'YOUR_ENCRYPTED_PASSWORD_HERE')
 ON CONFLICT (username) DO NOTHING;
 */
+
+-- ==========================================
+-- UPDATE SCRIPT TO ADD NEW PROJECT COLUMNS
+-- Run this manually in Supabase SQL Editor:
+-- ==========================================
+-- ALTER TABLE project 
+-- ADD COLUMN priority VARCHAR(50),
+-- ADD COLUMN lead_engineer VARCHAR(255),
+-- ADD COLUMN trello_link TEXT;

@@ -1,61 +1,86 @@
 import streamlit as st
 import pandas as pd
 import io
-from database.queries import import_employees, import_projects, import_assignments
+from database.queries import import_employees, import_projects, import_assignments, import_project_updates
 
-def read_csv_safe(uploaded_file):
-    """Read CSV with encoding fallback (UTF-8 -> cp1252)."""
-    try:
-        return pd.read_csv(uploaded_file)
-    except UnicodeDecodeError:
-        uploaded_file.seek(0)
-        return pd.read_csv(uploaded_file, encoding='cp1252')
+def get_excel_download(df):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    return buffer.getvalue()
+
+def read_excel_or_csv(uploaded_file):
+    """Read File depending on extension."""
+    if uploaded_file.name.endswith('.csv'):
+        try:
+            return pd.read_csv(uploaded_file)
+        except UnicodeDecodeError:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, encoding='cp1252')
+    else:
+        return pd.read_excel(uploaded_file)
 
 def render_import_page():
     st.subheader("Import Data", divider="blue")
-    col_emp, col_proj, col_assign = st.columns(3)
+    col_emp, col_proj = st.columns(2)
+    col_assign, col_update = st.columns(2)
     
     with col_emp:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
         st.write("### 👥 Employees")
-        uploaded_file = st.file_uploader("Upload Employees CSV", type="csv", key="emp_csv")
+        uploaded_file = st.file_uploader("Upload Employees File", type=["xls", "xlsx", "csv"], key="emp_csv")
         if uploaded_file:
-            df = read_csv_safe(uploaded_file)
+            df = read_excel_or_csv(uploaded_file)
             if st.button("Import Employees", type="primary"):
                 success, msg = import_employees(df)
                 st.success(msg) if success else st.error(msg)
         
         sample_emp = pd.DataFrame([["101", "John Doe", "U12345"]], columns=['a__Serial', 'Name', 'Slack ID'])
-        st.download_button("📥 Sample Employee CSV", sample_emp.to_csv(index=False), "sample_employees.csv", "text/csv", use_container_width=True)
+        st.download_button("📥 Sample Employee Excel", get_excel_download(sample_emp), "sample_employees.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.info("Required: 'a__Serial', 'Name', 'Slack ID'.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_proj:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
         st.write("### 🏗️ Projects")
-        uploaded_file = st.file_uploader("Upload Projects CSV", type="csv", key="proj_csv")
+        uploaded_file = st.file_uploader("Upload Projects File", type=["xls", "xlsx", "csv"], key="proj_csv")
         if uploaded_file:
-            df = read_csv_safe(uploaded_file)
+            df = read_excel_or_csv(uploaded_file)
             if st.button("Import Projects", type="primary"):
                 success, msg = import_projects(df)
                 st.success(msg) if success else st.error(msg)
         
-        sample_proj = pd.DataFrame([["P001", "Website Redesign", "In progress"]], columns=['Job No', 'Project', 'Status'])
-        st.download_button("📥 Sample Project CSV", sample_proj.to_csv(index=False), "sample_projects.csv", "text/csv", use_container_width=True)
-        st.info("Required: 'Job No', 'Project', 'Status'.")
+        sample_proj = pd.DataFrame([["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
+        st.download_button("📥 Sample Project Excel", get_excel_download(sample_proj), "sample_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_assign:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
         st.write("### 🔗 Assignments")
-        uploaded_file = st.file_uploader("Upload Assignments CSV", type="csv", key="assign_csv")
+        uploaded_file = st.file_uploader("Upload Assignments File", type=["xls", "xlsx", "csv"], key="assign_csv")
         if uploaded_file:
-            df = read_csv_safe(uploaded_file)
+            df = read_excel_or_csv(uploaded_file)
             if st.button("Import Assignments", type="primary"):
                 success, msg = import_assignments(df)
                 st.success(msg) if success else st.error(msg)
         
         sample_assign = pd.DataFrame([["101", "P001"]], columns=['Projects_Resources::a_EmployeeID', 'Projects_Resources::a_ProjectID'])
-        st.download_button("📥 Sample Assignment CSV", sample_assign.to_csv(index=False), "sample_assignments.csv", "text/csv", use_container_width=True)
+        st.download_button("📥 Sample Assignment Excel", get_excel_download(sample_assign), "sample_assignments.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.info("Required: 'Projects_Resources::a_EmployeeID', 'Projects_Resources::a_ProjectID'.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_update:
+        st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
+        st.write("### 🔄 Update Projects")
+        uploaded_file = st.file_uploader("Upload Update Projects File", type=["xls", "xlsx", "csv"], key="update_proj_csv")
+        if uploaded_file:
+            df = read_excel_or_csv(uploaded_file)
+            if st.button("Import Update Project", type="primary"):
+                success, msg = import_project_updates(df)
+                st.success(msg) if success else st.error(msg)
+        
+        sample_update_proj = pd.DataFrame([["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
+        st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'.")
         st.markdown('</div>', unsafe_allow_html=True)

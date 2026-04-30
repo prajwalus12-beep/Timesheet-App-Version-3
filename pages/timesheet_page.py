@@ -3,7 +3,7 @@ import datetime
 import pandas as pd
 import io
 import openpyxl
-from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry
+from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry, add_timesheet_entry
 from components.dialogs import entry_form_dialog, edit_form_dialog
 from utils.date_helpers import get_curr_cycle_dates
 
@@ -88,6 +88,9 @@ def render_timesheet_page(user):
 
         with col_proj:
             all_projs = get_all_projects()
+            all_projs['job_no_numeric'] = pd.to_numeric(all_projs['project_code'], errors='coerce')
+            all_projs = all_projs.sort_values(by=['job_no_numeric', 'project_code'], ascending=[False, False])
+            
             proj_options = {f"{r['project_code']} - {r['project_name']}": r['project_code'] for _, r in all_projs.iterrows()}
             selected_proj_name = st.selectbox("Project", ["All"] + list(proj_options.keys()), key="filter_proj")
             selected_proj_code = proj_options[selected_proj_name] if selected_proj_name != "All" else None
@@ -122,12 +125,12 @@ def render_timesheet_page(user):
             })
             export_df['Emp_Code'] = data['emp_id']
             export_df['Date'] = pd.to_datetime(export_df['Date']).dt.strftime('%d-%m-%Y')
-            phase_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement"}
+            phase_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement", "6": "Support"}
             export_df['Phase'] = export_df['Phase'].astype(str).map(phase_map).fillna(export_df['Phase'])
             
             # Convert columns to numeric to avoid Excel "Number Stored as Text" warnings
-            export_df['Emp_Code'] = pd.to_numeric(export_df['Emp_Code'], errors='ignore')
-            export_df['Project_Code'] = pd.to_numeric(export_df['Project_Code'], errors='ignore')
+            export_df['Emp_Code'] = pd.to_numeric(export_df['Emp_Code'], errors='coerce')
+            export_df['Project_Code'] = pd.to_numeric(export_df['Project_Code'], errors='coerce')
             
             # Sort by Employee Code then Date to match screenshot
             export_df = export_df.sort_values(by=['Emp_Code', 'Date'])
@@ -150,7 +153,7 @@ def render_timesheet_page(user):
             st.download_button(
                 label="📥 Export Excel", 
                 data=buffer.getvalue(), 
-                file_name="timesheet_export.xlsx", 
+                file_name=f"timesheet_export_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
                 use_container_width=True,
                 type="primary"
@@ -166,33 +169,82 @@ def render_timesheet_page(user):
         subset = data.iloc[start_idx:start_idx + rows_per_page]
 
         st.markdown('<div class="table-container">', unsafe_allow_html=True)
-        st.markdown('<div class="table-header"><div style="flex: 1.5;">Date</div><div style="flex: 2;">Employee</div><div style="flex: 3;">Project</div><div style="flex: 2;">Phase</div><div style="flex: 1.5;">Status</div><div style="flex: 1;">Hours</div><div style="flex: 1.5;">Action</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="table-header">'
+                    '<div style="flex: 1.5;">Date</div>'
+                    '<div style="flex: 1;">Emp Code</div>'
+                    '<div style="flex: 2;">Emp Name</div>'
+                    '<div style="flex: 1;">Project Code</div>'
+                    '<div style="flex: 3;">Project name</div>'
+                    '<div style="flex: 1.5;">Status</div>'
+                    '<div style="flex: 1.2;">Phases</div>'
+                    '<div style="flex: 0.8;">Hours</div>'
+                    '<div style="flex: 2.5;">Action</div>'
+                    '</div>', unsafe_allow_html=True)
 
         start_of_week = today - datetime.timedelta(days=today.weekday())
         end_of_week = start_of_week + datetime.timedelta(days=6)
 
+        phase_labels = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement", "6": "Support"}
         for _, row in subset.iterrows():
             st.markdown('<div class="table-row">', unsafe_allow_html=True)
-            c1, c2, c3, c_p, c_s, c4, c5 = st.columns([1.5, 2, 3, 2, 1.5, 1, 1.5])
+            c_date, c_empcode, c_empname, c_projcode, c_projname, c_status, c_phase, c_hour, c_action = st.columns([1.5, 1, 2, 1, 3, 1.5, 1.2, 0.8, 2.5])
             r_date = row['date']
             if isinstance(r_date, str): r_date = datetime.datetime.strptime(r_date, '%Y-%m-%d').date()
-            c1.markdown(f'<div class="table-cell date-cell"><b>{r_date.strftime("%d-%m-%Y")}</b></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="table-cell">{row["emp_id"]}-{row["emp_name"]}</div>', unsafe_allow_html=True)
-            proj_disp = f"{row['project_code']}-{row['project_name']}" if row['project_code'] else row['project_name']
-            c3.markdown(f'<div class="table-cell" title="{proj_disp}">{proj_disp}</div>', unsafe_allow_html=True)
-            phase_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement"}
-            c_p.markdown(f'<div class="table-cell">{phase_map.get(str(row["Phase"]), row["Phase"])}</div>', unsafe_allow_html=True)
-            c_s.markdown(f'<div class="table-cell">{row["project_status"]}</div>', unsafe_allow_html=True)
-            c4.markdown(f'<div class="table-cell">{row["hours"]:.2f}</div>', unsafe_allow_html=True)
+            c_date.markdown(f'<div class="table-cell date-cell"><b>{r_date.strftime("%d-%m-%Y")}</b></div>', unsafe_allow_html=True)
+            c_empcode.markdown(f'<div class="table-cell">{row["emp_id"]}</div>', unsafe_allow_html=True)
+            c_empname.markdown(f'<div class="table-cell" title="{row["emp_name"]}">{row["emp_name"]}</div>', unsafe_allow_html=True)
+            c_projcode.markdown(f'<div class="table-cell">{row["project_code"] if row["project_code"] else "-"}</div>', unsafe_allow_html=True)
+            c_projname.markdown(f'<div class="table-cell" title="{row["project_name"]}">{row["project_name"]}</div>', unsafe_allow_html=True)
+            c_status.markdown(f'<div class="table-cell">{row["project_status"]}</div>', unsafe_allow_html=True)
             
-            with c5:
+            p_val = str(row.get("Phase", "1"))
+            p_text = phase_labels.get(p_val, p_val)
+            c_phase.markdown(f'<div class="table-cell">{p_text}</div>', unsafe_allow_html=True)
+            c_hour.markdown(f'<div class="table-cell">{row["hours"]:.2f}</div>', unsafe_allow_html=True)
+            
+            with c_action:
+                # Always show Duplicate button
+                # If editable, show edit/delete as well
                 if start_of_week <= r_date <= end_of_week:
-                    ce, cd = st.columns(2)
-                    if ce.button("✏️", key=f"edit_{row['id']}"): edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
-                    if cd.button("🗑️", key=f"del_{row['id']}"):
-                        delete_timesheet_entry(row['id'])
-                        st.rerun()
-                else: st.markdown('<div style="text-align: center; color: #94a3b8;">🔒</div>', unsafe_allow_html=True)
+                    # Use 3 equal narrow columns so buttons never wrap
+                    ce, cd, cp = st.columns([1, 1, 1], gap="small")
+                    with ce:
+                        if st.button("✏️", key=f"edit_{row['id']}", use_container_width=True, help="Edit"):
+                            edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
+                    with cd:
+                        if st.button("🗑️", key=f"del_{row['id']}", use_container_width=True, help="Delete"):
+                            delete_timesheet_entry(row['id'])
+                            st.rerun()
+                    with cp:
+                        if st.button("👯", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
+                            add_timesheet_entry(
+                                row['emp_id'],
+                                row['emp_name'],
+                                row['project_code'],
+                                row['project_name'],
+                                row['date'],
+                                row['hours'],
+                                row['Phase'],
+                                row['project_status']
+                            )
+                            st.rerun()
+                else:
+                    cl, cp = st.columns([1, 1], gap="small")
+                    with cl:
+                        st.markdown('<div style="text-align:center;color:#94a3b8;line-height:2.4;">🔒</div>', unsafe_allow_html=True)
+                    with cp:
+                        if st.button("👯", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
+                            add_timesheet_entry(
+                                row['emp_id'],
+                                row['emp_name'],
+                                row['project_code'],
+                                row['project_name'],
+                                row['date'],
+                                row['hours'],
+                                row['Phase'],
+                                row['project_status']
+                            )
+                            st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         

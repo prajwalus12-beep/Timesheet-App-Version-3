@@ -20,25 +20,32 @@ def get_all_employees(exclude_admin=False):
 def get_all_projects():
     """Fetch all projects using Supabase SDK."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['project_code', 'project_name', 'status'])
+    if not supabase: return pd.DataFrame(columns=['project_code', 'project_name', 'status', 'priority', 'lead_engineer', 'trello_link'])
     
-    res = supabase.table('project').select('project_code, project_name, status').order('project_code', desc=True).execute()
+    res = supabase.table('project').select('project_code, project_name, status, priority, lead_engineer, trello_link').order('project_code', desc=True).execute()
     data = res.data or []
     
     # Decrypt project names
-    decrypted_res = [[r['project_code'], decrypt_data(r['project_name']), r['status']] for r in data]
-    return pd.DataFrame(decrypted_res, columns=['project_code', 'project_name', 'status'])
+    decrypted_res = [[r['project_code'], decrypt_data(r['project_name']), r['status'], r.get('priority'), r.get('lead_engineer'), r.get('trello_link')] for r in data]
+    return pd.DataFrame(decrypted_res, columns=['project_code', 'project_name', 'status', 'priority', 'lead_engineer', 'trello_link'])
 
 def get_user_by_username(username):
     """Fetch user details using Supabase SDK."""
     supabase = get_supabase_client()
     if not supabase: return None
     
-    res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until').eq('username', username).execute()
+    try:
+        # Try fetching with the new column
+        res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until, employee:employee(project_update_access)').eq('username', username).execute()
+    except Exception:
+        # Fallback if column doesn't exist
+        res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until').eq('username', username).execute()
+        
     data = res.data
     if data:
         u = data[0]
-        return (u['id'], u['employee_id'], u['username'], u['password'], u['failed_attempts'], u['locked_until'])
+        emp = u.get('employee') or {}
+        return (u['id'], u['employee_id'], u['username'], u['password'], u['failed_attempts'], u['locked_until'], emp.get('project_update_access', False))
     return None
 
 def update_user_lockout(username, failed_attempts, locked_until=None):
@@ -58,12 +65,16 @@ def update_user_lockout(username, failed_attempts, locked_until=None):
 def get_all_users():
     """Fetch all users with their details using Supabase SDK join-like approach."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password'])
+    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id'])
     
-    # Supabase allows embedding related tables if relationships are defined in DB
-    res = supabase.table('users').select('id, username, password, employee:employee(employee_name, slack_id)').order('username').execute()
+    try:
+        # Try fetching with the new column
+        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access)').order('username').execute()
+    except Exception:
+        # Fallback if column doesn't exist yet
+        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id)').order('username').execute()
+    
     data = res.data or []
-    
     rows = []
     for r in data:
         emp = r.get('employee') or {}
@@ -72,10 +83,12 @@ def get_all_users():
             r['username'],
             emp.get('employee_name'),
             emp.get('slack_id'),
-            r['password']
+            r['password'],
+            emp.get('project_update_access', False), # Defaults to False if missing
+            r['employee_id']
         ])
     
-    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password'])
+    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id'])
 
 def get_employee_by_id(emp_id):
     """Fetch single employee details using Supabase SDK."""
@@ -90,7 +103,7 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
-    phase_map = {"Analysis": "1", "Design": "2", "Development": "3", "Testing": "4", "Deployement": "5"}
+    phase_map = {"Analysis": "1", "Design": "2", "Development": "3", "Testing": "4", "Deployement": "5", "Support": "6"}
     phase_code = phase_map.get(phase, phase)
     
     data = {
@@ -161,7 +174,7 @@ def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_nam
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
-    phase_map = {"Analysis": "1", "Design": "2", "Development": "3", "Testing": "4", "Deployement": "5"}
+    phase_map = {"Analysis": "1", "Design": "2", "Development": "3", "Testing": "4", "Deployement": "5", "Support": "6"}
     phase_code = phase_map.get(phase, phase)
     
     data = {
@@ -272,13 +285,15 @@ def check_assignment(emp_id, project_code):
     res = supabase.table('project_employee').select('1').match({'employee_id': emp_id, 'project_code': project_code}).execute()
     return len(res.data) > 0
 
+def _sanitize_dict(d):
+    """Replace any NaN/NaT values with None so they serialize as JSON null."""
+    return {k: (None if pd.isna(v) else v) if not isinstance(v, str) else v
+            for k, v in d.items()}
+
 def import_projects(df):
     """Import projects using Supabase SDK. Updates existing projects by Job No."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
-    
-    # Replace NaN with None for JSON compliance
-    df = df.where(pd.notnull(df), None)
     
     try:
         # Fetch existing project codes to determine new vs updated
@@ -289,12 +304,16 @@ def import_projects(df):
         updated_count = 0
         new_count = 0
         for _, row in df.iterrows():
-            code = str(row.get('Job No', ''))
-            data.append({
+            code = str(row.get('Job No') or row.get('Project Code') or '')
+            record = {
                 "project_code": code,
-                "project_name": encrypt_data(row.get('Project', '')),
-                "status": row.get('Status', 'In progress')
-            })
+                "project_name": encrypt_data(str(row.get('Project', ''))),
+                "status": row.get('Status', 'In progress'),
+                "priority": row.get('Job Priority'),
+                "lead_engineer": row.get('Lead engineer'),
+                "trello_link": row.get('Trello')
+            }
+            data.append(_sanitize_dict(record))
             if code in existing_codes:
                 updated_count += 1
             else:
@@ -311,9 +330,6 @@ def import_employees(df):
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
-    # Replace NaN with None for JSON compliance
-    df = df.where(pd.notnull(df), None)
-    
     try:
         from services.auth_service import FIXED_PASSWORD
         emp_data = []
@@ -325,19 +341,19 @@ def import_employees(df):
             slack_id = row.get('Slack ID', '')
             if not emp_id or not emp_name: continue
             
-            emp_data.append({
+            emp_data.append(_sanitize_dict({
                 "employee_id": emp_id,
                 "employee_name": emp_name,
                 "slack_id": slack_id
-            })
+            }))
             
             username = " ".join(emp_name.strip().lower().split())
             enc_pwd = encrypt_data(FIXED_PASSWORD)
-            user_data.append({
+            user_data.append(_sanitize_dict({
                 "employee_id": emp_id,
                 "username": username,
                 "password": enc_pwd
-            })
+            }))
             
         if emp_data:
             supabase.table('employee').upsert(emp_data).execute()
@@ -353,23 +369,165 @@ def import_assignments(df):
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
-    # Replace NaN with None for JSON compliance
-    df = df.where(pd.notnull(df), None)
-    
     try:
         data = []
         for _, row in df.iterrows():
             emp_code = str(row.get('Projects_Resources::a_EmployeeID', ''))
             proj_code = str(row.get('Projects_Resources::a_ProjectID', ''))
             if emp_code and proj_code:
-                data.append({
+                data.append(_sanitize_dict({
                     "employee_id": emp_code,
                     "project_code": proj_code
-                })
+                }))
         
         if data:
             supabase.table('project_employee').upsert(data).execute()
         return True, f"Successfully imported {len(df)} assignments."
+    except Exception as e:
+        return False, str(e)
+
+def get_project_reports():
+    """Fetch all data from project_reports table."""
+    supabase = get_supabase_client()
+    if not supabase: return pd.DataFrame()
+    
+    res = supabase.table('project_reports').select('*').order('project_code', desc=True).execute()
+    data = res.data or []
+    if not data:
+        return pd.DataFrame()
+    return pd.DataFrame(data)
+
+def import_project_updates(df):
+    """Import project updates into project_reports using Supabase SDK."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    try:
+        # Fetch existing records for comparison (only the fields we need to diff)
+        existing_res = supabase.table('project_reports').select(
+            'project_code, project_name, lead_engineer, priority, status, trello_link'
+        ).execute()
+        existing_map = {r['project_code']: r for r in (existing_res.data or [])}
+        
+        inserts = []
+        updates = []
+        resets = []   # records that match import — clear all *_updated flags
+        for _, row in df.iterrows():
+            code = str(row.get('Job No') or row.get('Project Code') or '')
+            if not code or code.lower() == 'nan':
+                continue
+            
+            # Build record with default flags set to False
+            record = {
+                "project_code": code,
+                "project_name": str(row.get('Project', '')),
+                "lead_engineer": str(row.get('Lead engineer', '')),
+                "priority": str(row.get('Job Priority', '')),
+                "status": str(row.get('Status', 'In progress')),
+                "trello_link": str(row.get('Trello', '')) if pd.notna(row.get('Trello')) else None,
+                "project_code_updated": False,
+                "project_name_updated": False,
+                "lead_engineer_updated": False,
+                "priority_updated": False,
+                "status_updated": False,
+                "trello_link_updated": False,
+                "start_date_updated": False,
+                "end_date_updated": False,
+                "phase_updated": False,
+                "prototype_link_updated": False
+            }
+            clean_record = _sanitize_dict(record)
+            
+            if code in existing_map:
+                # Compare with existing record to see if any field changed
+                existing = existing_map[code]
+                changes = []
+                # Compare each relevant field
+                if clean_record.get('project_name') != existing.get('project_name'):
+                    changes.append('project_name')
+                if clean_record.get('lead_engineer') != existing.get('lead_engineer'):
+                    changes.append('lead_engineer')
+                if clean_record.get('priority') != existing.get('priority'):
+                    changes.append('priority')
+                if clean_record.get('status') != existing.get('status'):
+                    changes.append('status')
+                if clean_record.get('trello_link') != existing.get('trello_link'):
+                    changes.append('trello_link')
+                if changes:
+                    # Import is restoring canonical data — clear ALL highlight
+                    # flags instead of setting them (this is not a manual edit).
+                    updates.append(clean_record)
+                else:
+                    # No field changes → import confirms data matches; clear any existing highlight flags
+                    resets.append(code)
+            else:
+                # New record – set a default phase and mark as insert
+                clean_record["phase"] = "Analysis"
+                inserts.append(clean_record)
+        if inserts:
+            supabase.table('project_reports').insert(inserts).execute()
+        if updates:
+            for u in updates:
+                supabase.table('project_reports').update(u).eq('project_code', u['project_code']).execute()
+        if resets:
+            # Clear all *_updated flags for records that exactly match the imported sheet
+            # Use a single batched call instead of per-record loop to avoid socket exhaustion
+            reset_payload = {
+                "project_code_updated": False,
+                "project_name_updated": False,
+                "lead_engineer_updated": False,
+                "priority_updated": False,
+                "status_updated": False,
+                "trello_link_updated": False,
+                "start_date_updated": False,
+                "end_date_updated": False,
+                "phase_updated": False,
+                "prototype_link_updated": False
+            }
+            supabase.table('project_reports').update(reset_payload).in_('project_code', resets).execute()
+        return True, f"Successfully imported {len(inserts)} new, updated {len(updates)} changed, and cleared highlights for {len(resets)} matched project(s)."
+    except Exception as e:
+        return False, str(e)
+
+def save_project_updates(edited_rows_dict, current_df):
+    """Process st.data_editor changes and save to project_reports, updating flags."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    try:
+        updated_records = []
+        for row_idx, changes in edited_rows_dict.items():
+            # Get original row using index
+            orig_row = current_df.iloc[int(row_idx)]
+            proj_code = orig_row['project_code']
+            
+            update_payload = {"project_code": proj_code}
+            
+            for col, new_val in changes.items():
+                update_payload[col] = new_val
+                # Set the updated flag to true if a corresponding column exists
+                flag_col = f"{col}_updated"
+                if flag_col in current_df.columns:
+                    update_payload[flag_col] = True
+            
+            if len(update_payload) > 1: # More than just project_code
+                updated_records.append(update_payload)
+                
+        for record in updated_records:
+            supabase.table('project_reports').update(record).eq('project_code', record['project_code']).execute()
+            
+        return True, f"Successfully updated {len(updated_records)} projects."
+    except Exception as e:
+        return False, str(e)
+
+def update_project_update_access(employee_id, has_access):
+    """Update an employee's access to the project update page."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    try:
+        supabase.table('employee').update({'project_update_access': has_access}).eq('employee_id', employee_id).execute()
+        return True, "Success"
     except Exception as e:
         return False, str(e)
 
@@ -382,10 +540,11 @@ def init_db():
         from services.auth_service import FIXED_PASSWORD
         enc_pwd = encrypt_data(FIXED_PASSWORD)
         
-        # 1. UPSERT admin employee
+        # 1. UPSERT admin employee (admins always have access)
         supabase.table('employee').upsert({
             "employee_id": "admin", 
-            "employee_name": "System Administrator"
+            "employee_name": "System Administrator",
+            "project_update_access": True
         }).execute()
         
         # 2. UPSERT admin user
