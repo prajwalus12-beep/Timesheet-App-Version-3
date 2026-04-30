@@ -397,6 +397,36 @@ def get_project_reports():
         return pd.DataFrame()
     return pd.DataFrame(data)
 
+def _parse_date_value(val):
+    """Convert an Excel date cell value to an ISO date string, or None if blank."""
+    if val is None:
+        return None
+    # pandas NaT / numpy NaN
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    # pandas Timestamp or datetime.datetime / datetime.date
+    if hasattr(val, 'date'):
+        try:
+            return val.date().isoformat()
+        except Exception:
+            pass
+    if hasattr(val, 'isoformat'):
+        return val.isoformat()
+    # Plain string
+    s = str(val).strip()
+    if not s or s.lower() in ('nat', 'none', 'nan', ''):
+        return None
+    # Try to parse a string date so it is normalised to YYYY-MM-DD
+    try:
+        # Use dayfirst=True and mixed format for robust parsing
+        return pd.to_datetime(s, format='mixed', dayfirst=True).date().isoformat()
+    except Exception:
+        return s  # return as-is if unparseable
+
+
 def import_project_updates(df):
     """Import project updates into project_reports using Supabase SDK."""
     supabase = get_supabase_client()
@@ -405,17 +435,51 @@ def import_project_updates(df):
     try:
         # Fetch existing records for comparison (only the fields we need to diff)
         existing_res = supabase.table('project_reports').select(
-            'project_code, project_name, lead_engineer, priority, status, trello_link'
+            'project_code, project_name, lead_engineer, priority, status, trello_link, start_date, end_date'
         ).execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
         inserts = []
         updates = []
         resets = []   # records that match import — clear all *_updated flags
+        
+        # Robustly identify column names for start/end date
+        start_date_col = None
+        end_date_col = None
+        
+        debug_log = [f"Dataframe columns: {list(df.columns)}"]
+        
+        for col in df.columns:
+            clean_col = str(col).strip().lower().replace('_', ' ')
+            if clean_col in ['start date', 'startdate', 'date start']:
+                start_date_col = col
+            elif clean_col in ['end date', 'enddate', 'date finish', 'date end']:
+                end_date_col = col
+        debug_log.append(f"Found start_date_col: {start_date_col}, end_date_col: {end_date_col}")
+
         for _, row in df.iterrows():
             code = str(row.get('Job No') or row.get('Project Code') or '')
             if not code or code.lower() == 'nan':
                 continue
+
+            # Parse date fields from the Excel row using discovered column names
+            start_date_val = row[start_date_col] if start_date_col and start_date_col in row else None
+            end_date_val = row[end_date_col] if end_date_col and end_date_col in row else None
+            
+            start_date = _parse_date_value(start_date_val)
+            end_date   = _parse_date_value(end_date_val)
+            
+            if _ < 5: # Log first 5 rows for debugging
+                debug_log.append(f"Row {_}: start_val={start_date_val!r} -> {start_date!r}, end_val={end_date_val!r} -> {end_date!r}")
+            
+            # Write debug log to file so the assistant can read it
+            import os
+            try:
+                os.makedirs("scratch", exist_ok=True)
+                with open("scratch/import_debug.txt", "w", encoding="utf-8") as f:
+                    f.write("\n".join(debug_log))
+            except Exception:
+                pass
             
             # Build record with default flags set to False
             record = {
@@ -425,6 +489,8 @@ def import_project_updates(df):
                 "priority": str(row.get('Job Priority', '')),
                 "status": str(row.get('Status', 'In progress')),
                 "trello_link": str(row.get('Trello', '')) if pd.notna(row.get('Trello')) else None,
+                "start_date": start_date,
+                "end_date": end_date,
                 "project_code_updated": False,
                 "project_name_updated": False,
                 "lead_engineer_updated": False,
@@ -453,6 +519,10 @@ def import_project_updates(df):
                     changes.append('status')
                 if clean_record.get('trello_link') != existing.get('trello_link'):
                     changes.append('trello_link')
+                if clean_record.get('start_date') != existing.get('start_date'):
+                    changes.append('start_date')
+                if clean_record.get('end_date') != existing.get('end_date'):
+                    changes.append('end_date')
                 if changes:
                     # Import is restoring canonical data — clear ALL highlight
                     # flags instead of setting them (this is not a manual edit).

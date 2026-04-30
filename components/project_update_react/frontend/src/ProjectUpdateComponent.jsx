@@ -46,6 +46,7 @@ function ProjectUpdateComponent(props) {
   const [filterPhase, setFilterPhase] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterUpdatedOnly, setFilterUpdatedOnly] = useState(false);
+  const [filterShowCompleted, setFilterShowCompleted] = useState(false);
 
   // Adjust iframe height after each render
   useEffect(() => { Streamlit.setFrameHeight(); });
@@ -67,20 +68,32 @@ function ProjectUpdateComponent(props) {
       if (filterPriority && (p.priority || "").toUpperCase() !== filterPriority.toUpperCase()) return false;
       if (filterPhase && p.phase !== filterPhase) return false;
       if (filterStatus && p.status !== filterStatus) return false;
-      if (filterUpdatedOnly) {
-        const hasUpdate = updatedFlagKeys.some(
-          (k) => p[k] === true || p[k] === "true" || p[k] === "True"
-        );
-        if (!hasUpdate) return false;
+      
+      const isComplete = p.status === "Complete";
+      const hasUpdate = updatedFlagKeys.some(
+        (k) => p[k] === true || p[k] === "true" || p[k] === "True"
+      );
+
+      // Status filters handle "Complete" visibility logic
+      if (filterShowCompleted) {
+        // If "Show Completed Only" is active, hide everything else
+        if (!isComplete) return false;
+      } else {
+        // By default, hide completed records UNLESS they have been highlighted/updated
+        if (isComplete && !hasUpdate) return false;
       }
+
+      if (filterUpdatedOnly && !hasUpdate) return false;
+      
       return true;
     });
-  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriority, filterPhase, filterStatus, filterUpdatedOnly]);
+  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriority, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
   const resetFilters = () => {
     setFilterName(""); setFilterCodeMin(""); setFilterCodeMax("");
     setFilterLead(""); setFilterPriority(""); setFilterPhase(""); setFilterStatus("");
     setFilterUpdatedOnly(false);
+    setFilterShowCompleted(false);
   };
 
   // ---- Infinite Scroll ----
@@ -291,17 +304,28 @@ function ProjectUpdateComponent(props) {
               </div>
             </div>
 
-            {/* Updated Records toggle */}
+            {/* Quick Filters */}
             <div className="pu-filter-group pu-filter-group--full">
-              <label className="pu-filter-label">Quick Filter</label>
-              <button
-                className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
-                onClick={() => setFilterUpdatedOnly((v) => !v)}
-                title="Show only rows with highlighted (updated) fields"
-              >
-                <span className="pu-updated-dot" />
-                Updated Records Only
-              </button>
+              <label className="pu-filter-label">Quick Filters</label>
+              <div style={{display: "flex", gap: "10px"}}>
+                <button
+                  className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
+                  onClick={() => setFilterUpdatedOnly((v) => !v)}
+                  title="Show only rows with highlighted (updated) fields"
+                >
+                  <span className="pu-updated-dot" />
+                  Updated Records Only
+                </button>
+                <button
+                  className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
+                  onClick={() => setFilterShowCompleted((v) => !v)}
+                  style={{borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : ""}}
+                  title="Show only completed projects"
+                >
+                  <span className="pu-updated-dot" style={{backgroundColor: filterShowCompleted ? "#10b981" : ""}} />
+                  Completed Records
+                </button>
+              </div>
             </div>
 
           </div>

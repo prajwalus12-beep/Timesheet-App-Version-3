@@ -123,7 +123,7 @@ def render_project_update_page_v2():
         record = {}
         for col in df.columns:
             val = row[col]
-            if pd.isna(val):
+            if pd.isna(val) or str(val).strip().lower() == 'nan':
                 record[col] = None
             elif hasattr(val, 'isoformat'):
                 record[col] = val.isoformat() if val is not None else None
@@ -146,13 +146,34 @@ def render_project_update_page_v2():
 
     # Extract unique lead engineers
     lead_engineers = sorted(set(
-        str(e) for e in df['lead_engineer'].dropna().unique() if str(e).strip()
+        str(e) for e in df['lead_engineer'].dropna().unique() 
+        if str(e).strip() and str(e).strip().lower() != 'nan'
     ))
+    
+    # Extract unique statuses dynamically, preserving defaults if missing
+    status_options = sorted(set(
+        str(e) for e in df['status'].dropna().unique() if str(e).strip()
+    ))
+    for s in ["In progress", "Complete", "On hold", "Cancelled"]:
+        if s not in status_options:
+            status_options.append(s)
+    status_options = sorted(set(status_options))
+
+    # Extract unique phases dynamically, preserving defaults if missing
+    phase_options = sorted(set(
+        str(e) for e in df['phase'].dropna().unique() if str(e).strip()
+    ))
+    for p in ["Analysis", "Design", "Development", "Testing", "Deployment", "Support"]:
+        if p not in phase_options:
+            phase_options.append(p)
+    phase_options = sorted(set(phase_options))
 
     # Render the React component (height scales with content)
     result = project_update_component(
         projects=projects_list,
         lead_engineers=lead_engineers,
+        phase_options=phase_options,
+        status_options=status_options,
         key=f"pu_react_{st.session_state.get('pu_react_refresh', 0)}"
     )
 

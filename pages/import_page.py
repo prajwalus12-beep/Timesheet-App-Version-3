@@ -80,7 +80,10 @@ def render_import_page():
                 success, msg = import_project_updates(df)
                 st.success(msg) if success else st.error(msg)
         
-        sample_update_proj = pd.DataFrame([["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
+        sample_update_proj = pd.DataFrame(
+            [["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123", "2025-01-01", "2025-06-30"]],
+            columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello', 'Start Date', 'End Date']
+        )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'.")
+        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'. Optional: 'Start Date', 'End Date'.")
         st.markdown('</div>', unsafe_allow_html=True)
