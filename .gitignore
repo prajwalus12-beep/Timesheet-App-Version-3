@@ -4,5 +4,5 @@ node_modules/
 .env
 __pycache__/
 dist/
-build/
+# build/ (Removed to allow Streamlit Cloud deployment of React components)
 automaticmanualtesting.py
