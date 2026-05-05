@@ -3,7 +3,7 @@ import os
 import streamlit.components.v1 as components
 
 # When built (production), serve from the build folder
-_RELEASE = False
+_RELEASE = True
 
 if _RELEASE:
     _parent_dir = os.path.dirname(os.path.abspath(__file__))
