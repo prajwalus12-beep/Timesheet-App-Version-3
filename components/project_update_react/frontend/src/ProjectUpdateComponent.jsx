@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Streamlit, withStreamlitConnection } from "streamlit-component-lib";
-import { ExternalLink, Search, Filter, Download, X, Info, Save } from "lucide-react";
+import { ExternalLink, Search, Filter, Download, X, Info, Save, Link } from "lucide-react";
 import "./styles.css";
 
 function ProjectUpdateComponent(props) {
@@ -198,6 +198,12 @@ function ProjectUpdateComponent(props) {
     return "";
   };
 
+  // Truncate text helper
+  const truncate = (text, maxLen = 30) => {
+    if (!text) return "";
+    return text.length > maxLen ? text.substring(0, maxLen) + "…" : text;
+  };
+
   // ---- Render ----
   return (
     <div className="pu-page">
@@ -331,127 +337,128 @@ function ProjectUpdateComponent(props) {
           </div>
         </div>
 
-        {/* Data Table */}
+        {/* Data Table — Two-line row layout matching screenshot */}
         <div className="pu-table-wrapper">
           <div className="pu-table-scroll" onScroll={handleScroll}>
             <table className="pu-table">
               <thead>
                 <tr>
-                  <th className="center" style={{minWidth:40, width:40}}>#</th>
-                  <th style={{minWidth:70, width:70}}>Code</th>
-                  <th style={{minWidth:180}}>Project Name</th>
-                  <th style={{minWidth:200}}>Lead Engineer</th>
-                  <th className="center" style={{minWidth:70, width:70}}>Priority</th>
-                  <th style={{minWidth:130}}>Start Date</th>
-                  <th style={{minWidth:130}}>End Date</th>
-                  <th style={{minWidth:120}}>Status</th>
-                  <th style={{minWidth:120}}>Phase</th>
-                  <th className="center" style={{minWidth:140}}>Trello</th>
-                  <th className="center" style={{minWidth:140}}>Prototype</th>
+                  <th className="th-hash" rowSpan="3">#</th>
+                  <th className="th-code" rowSpan="3">CODE</th>
+                  <th className="th-project">PROJECT NAME</th>
+                  <th className="th-lead">LEAD ENGINEER</th>
+                  <th className="th-status">STATUS</th>
+                  <th className="th-phase">PHASE</th>
+                </tr>
+                <tr>
+                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> TRELLO URL</th>
+                  <th className="th-sub">START DATE</th>
+                  <th className="th-sub">END DATE</th>
+                  <th className="th-sub"><span className="th-sub-icon-circle">⊙</span> PRIORITY</th>
+                </tr>
+                <tr>
+                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> PROTOTYPE URL</th>
+                  <th className="th-sub" colSpan="3"></th>
                 </tr>
               </thead>
               <tbody>
                 {filteredProjects.length > 0 ? (
                   filteredProjects.slice(0, displayCount).map((project, index) => (
-                    <tr key={project.project_code}>
-                      <td className="num-col">{index + 1}</td>
-                      <td className="code-col">{project.project_code}</td>
+                    <React.Fragment key={project.project_code}>
+                      {/* Primary row */}
+                      <tr className="pu-row-primary">
+                        <td className="td-hash" rowSpan="3">{index + 1}</td>
+                        <td className="td-code" rowSpan="3">{project.project_code}</td>
 
-                      {/* Project Name */}
-                      <td>
-                        <input type="text" value={project.project_name || ""}
-                          onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
-                          className={cellInputClass(project.project_code, "project_name")}
-                          title={project.project_name || ""} />
-                      </td>
+                        {/* Project Name */}
+                        <td className="td-project-name">
+                          <input type="text" value={project.project_name || ""}
+                            onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
+                            className={cellInputClass(project.project_code, "project_name", "")}
+                            title={project.project_name || ""} />
+                        </td>
 
-                      {/* Lead Engineer */}
-                      <td>
-                        <select value={project.lead_engineer || ""}
-                          onChange={(e) => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
-                          className={cellSelectClass(project.project_code, "lead_engineer")}>
-                          <option value="">—</option>
-                          {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
-                        </select>
-                      </td>
+                        {/* Lead Engineer */}
+                        <td className="td-lead">
+                          <select value={project.lead_engineer || ""}
+                            onChange={(e) => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
+                            className={cellSelectClass(project.project_code, "lead_engineer")}>
+                            <option value="">Unassigned</option>
+                            {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
+                          </select>
+                        </td>
 
-                      {/* Priority */}
-                      <td>
-                        <input type="text" value={project.priority || ""}
-                          onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
-                          maxLength={4}
-                          className={cellInputClass(project.project_code, "priority", "priority-field")}
-                          title="P followed by 1-2 digits (e.g. P1, P10)" />
-                      </td>
+                        {/* Status */}
+                        <td className="td-status">
+                          <select value={project.status || "In progress"}
+                            onChange={(e) => handleUpdate(project.project_code, "status", e.target.value)}
+                            className={cellSelectClass(project.project_code, "status", statusClass(project.status))}>
+                            {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
 
-                      {/* Start Date */}
-                      <td>
-                        <input type="date" value={project.start_date || ""}
-                          onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                          className={cellInputClass(project.project_code, "start_date", "date-field")} />
-                      </td>
+                        {/* Phase */}
+                        <td className="td-phase">
+                          <select value={project.phase || "Analysis"}
+                            onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
+                            className={cellSelectClass(project.project_code, "phase")}>
+                            {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
+                          </select>
+                        </td>
+                      </tr>
 
-                      {/* End Date */}
-                      <td>
-                        <input type="date" value={project.end_date || ""}
-                          onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                          className={cellInputClass(project.project_code, "end_date", "date-field")} />
-                      </td>
-
-                      {/* Status */}
-                      <td>
-                        <select value={project.status || "In progress"}
-                          onChange={(e) => handleUpdate(project.project_code, "status", e.target.value)}
-                          className={cellSelectClass(project.project_code, "status")}>
-                          {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </td>
-
-                      {/* Phase */}
-                      <td>
-                        <select value={project.phase || "Analysis"}
-                          onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
-                          className={cellSelectClass(project.project_code, "phase")}>
-                          {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
-                        </select>
-                      </td>
-
-                      {/* Trello */}
-                      <td>
-                        <div className="pu-link-cell">
+                      {/* Secondary row */}
+                      <tr className="pu-row-secondary">
+                        {/* Trello URL */}
+                        <td className="td-trello">
                           <input type="text" value={project.trello_link || ""}
                             onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
                             className={cellInputClass(project.project_code, "trello_link", "url-field")}
                             placeholder="Trello URL" />
-                          {project.trello_link && (
-                            <a href={project.trello_link} target="_blank" rel="noopener noreferrer"
-                              className="pu-external-link" title="Open Trello">
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Prototype */}
-                      <td>
-                        <div className="pu-link-cell">
+                        {/* Start Date */}
+                        <td className="td-date">
+                          <input type="date" value={project.start_date || ""}
+                            onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
+                            className={cellInputClass(project.project_code, "start_date", "date-field")}
+                            placeholder="dd - mm - yyyy" />
+                        </td>
+
+                        {/* End Date */}
+                        <td className="td-date">
+                          <input type="date" value={project.end_date || ""}
+                            onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
+                            className={cellInputClass(project.project_code, "end_date", "date-field")}
+                            placeholder="dd - mm - yyyy" />
+                        </td>
+
+                        {/* Priority */}
+                        <td className="td-priority">
+                          <input type="text" value={project.priority || ""}
+                            onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
+                            maxLength={4}
+                            className={cellInputClass(project.project_code, "priority", "priority-field")}
+                            title="Priority (e.g. 10)" />
+                        </td>
+                      </tr>
+
+                      {/* Tertiary row */}
+                      <tr className="pu-row-tertiary">
+                        {/* Prototype URL */}
+                        <td className="td-prototype">
                           <input type="text" value={project.prototype_link || ""}
                             onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
                             className={cellInputClass(project.project_code, "prototype_link", "url-field")}
                             placeholder="Prototype URL" />
-                          {project.prototype_link && (
-                            <a href={project.prototype_link} target="_blank" rel="noopener noreferrer"
-                              className="pu-external-link purple" title="Open Prototype">
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td colSpan="3"></td>
+                      </tr>
+                    </React.Fragment>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="11">
+                    <td colSpan="6">
                       <div className="pu-empty-state">
                         <Search size={24} />
                         <p>No projects match your current filters.</p>

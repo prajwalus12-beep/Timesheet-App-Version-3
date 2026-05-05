@@ -216,7 +216,7 @@ def render_timesheet_page(user):
                             delete_timesheet_entry(row['id'])
                             st.rerun()
                     with cp:
-                        if st.button("👯", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
+                        if st.button(":material/content_copy:", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
                             add_timesheet_entry(
                                 row['emp_id'],
                                 row['emp_name'],
@@ -233,7 +233,7 @@ def render_timesheet_page(user):
                     with cl:
                         st.markdown('<div style="text-align:center;color:#94a3b8;line-height:2.4;">🔒</div>', unsafe_allow_html=True)
                     with cp:
-                        if st.button("👯", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
+                        if st.button(":material/content_copy:", key=f"dup_{row['id']}", use_container_width=True, help="Duplicate Entry"):
                             add_timesheet_entry(
                                 row['emp_id'],
                                 row['emp_name'],
