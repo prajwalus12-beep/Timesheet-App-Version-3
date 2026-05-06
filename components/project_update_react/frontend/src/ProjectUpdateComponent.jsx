@@ -386,11 +386,15 @@ function ProjectUpdateComponent(props) {
 
                         {/* Project Name */}
                         <td className="td-project-name">
-                          <input type="text" value={project.project_name || ""}
+                          <textarea 
+                            rows={2}
+                            value={project.project_name || ""}
                             onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
-                            className={cellInputClass(project.project_code, "project_name", project.project_name)}
+                            className={cellInputClass(project.project_code, "project_name", project.project_name, "name-field")}
                             disabled={readOnly}
-                            title={project.project_name || "Project Name is required"} />
+                            title={project.project_name || "Project Name is required"} 
+                            style={{ resize: "none", overflow: "hidden", fontFamily: "inherit", minHeight: "3rem", lineHeight: "1.25" }}
+                          />
                         </td>
 
                         {/* Lead Engineer */}
