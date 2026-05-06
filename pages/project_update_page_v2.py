@@ -171,14 +171,18 @@ def render_project_update_page_v2(user):
         if str(e).strip() and str(e).strip().lower() != 'nan'
     ))
     
-    # Extract unique statuses dynamically, preserving defaults if missing
-    status_options = sorted(set(
-        str(e) for e in df['status'].dropna().unique() if str(e).strip()
-    ))
-    for s in ["In progress", "Complete", "On hold", "Cancelled"]:
-        if s not in status_options:
-            status_options.append(s)
-    status_options = sorted(set(status_options))
+    # Use fixed status options from the provided screenshot
+    status_options = [
+        "Not started",
+        "Awaiting Info",
+        "At Beta",
+        "In progress",
+        "In testing",
+        "Complete",
+        "To be deployed",
+        "Duplicate - Closed",
+        "Ongoing"
+    ]
 
     # Extract unique phases dynamically, preserving defaults if missing
     phase_options = sorted(set(

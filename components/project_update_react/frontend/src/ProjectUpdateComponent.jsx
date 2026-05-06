@@ -200,8 +200,13 @@ function ProjectUpdateComponent(props) {
   const statusClass = (status) => {
     if (status === "Complete") return "status-complete";
     if (status === "In progress") return "status-progress";
-    if (status === "On hold") return "status-hold";
-    if (status === "Cancelled") return "status-cancel";
+    if (status === "In testing") return "status-testing";
+    if (status === "Not started") return "status-not-started";
+    if (status === "Awaiting Info") return "status-awaiting";
+    if (status === "At Beta") return "status-beta";
+    if (status === "To be deployed") return "status-deploy";
+    if (status === "Duplicate - Closed") return "status-duplicate";
+    if (status === "Ongoing") return "status-ongoing";
     return "";
   };
 
