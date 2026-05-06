@@ -4,7 +4,7 @@ import pandas as pd
 import io
 import datetime
 from openpyxl.styles import PatternFill
-from database.queries import get_project_reports, save_project_updates
+from database.queries import get_project_reports, save_project_updates, get_all_employees
 from components.project_update_react import project_update_component
 
 
@@ -117,11 +117,23 @@ def render_project_update_page_v2(user):
     if read_only:
         st.info("ℹ️ View-only mode. You do not have permission to edit project attributes.")
 
-    # Fetch data from Supabase
+    # 1. Fetch Master Data
     df = get_project_reports()
+    all_emps = get_all_employees()
+    valid_emp_names = set(str(n).strip() for n in all_emps['employee_name'].dropna())
 
     if df.empty:
         st.info("No projects found in project_reports. Please upload via 'Import Data' → 'Update Projects'.")
+        return
+
+    # 2. Filter data to only include projects with valid lead engineers
+    # Projects with leads not in the employee table are treated as non-relevant
+    # We strip whitespace to handle potential data entry issues
+    df['lead_engineer_clean'] = df['lead_engineer'].fillna('').str.strip()
+    df = df[df['lead_engineer_clean'].isin(valid_emp_names)]
+
+    if df.empty:
+        st.info("No relevant projects found (Lead Engineer must be a valid employee).")
         return
 
     # Prepare data for the React component
@@ -130,6 +142,7 @@ def render_project_update_page_v2(user):
     for _, row in df.iterrows():
         record = {}
         for col in df.columns:
+            if col == 'lead_engineer_clean': continue
             val = row[col]
             if pd.isna(val) or str(val).strip().lower() == 'nan':
                 record[col] = None
@@ -152,9 +165,9 @@ def render_project_update_page_v2(user):
                     record[col] = str(val) if val is not None else None
         projects_list.append(record)
 
-    # Extract unique lead engineers
+    # Extract unique lead engineers (already filtered by valid_emp_names above)
     lead_engineers = sorted(set(
-        str(e) for e in df['lead_engineer'].dropna().unique() 
+        str(e).strip() for e in df['lead_engineer'].dropna().unique() 
         if str(e).strip() and str(e).strip().lower() != 'nan'
     ))
     
@@ -193,54 +206,32 @@ def render_project_update_page_v2(user):
         if action == "save":
             edits = result.get("edits", {})
             if edits:
-                # Convert React edits format to the format expected by save_project_updates
-                # React sends: {"project_code": {"field": "new_value", ...}}
-                # save_project_updates expects: {row_idx: {"field": "new_value", ...}}
-                edited_rows = {}
+                # Directly update via Supabase
+                from database.connection import get_supabase_client
+                supabase = get_supabase_client()
+                
+                save_count = 0
                 for proj_code, changes in edits.items():
-                    # Find row index in the DataFrame
-                    matching = df[df['project_code'] == proj_code]
-                    if not matching.empty:
-                        row_idx = matching.index[0]
-                        # Build the update payload with _updated flags
-                        update = {}
-                        for col, new_val in changes.items():
-                            update[col] = new_val
-                            flag_col = f"{col}_updated"
-                            if flag_col in df.columns:
-                                update[flag_col] = True
-                        edited_rows[str(row_idx)] = update
-
-                if edited_rows:
-                    # Build a proper current_df for save_project_updates
-                    # Reset index to use positional indexing
-                    current_df = df.reset_index(drop=True)
+                    update_payload = {}
+                    for col, new_val in changes.items():
+                        update_payload[col] = new_val
+                        flag_col = f"{col}_updated"
+                        # We use the original df to check for column existence
+                        if flag_col in df.columns:
+                            update_payload[flag_col] = True
                     
-                    # Directly update via Supabase
-                    from database.connection import get_supabase_client
-                    supabase = get_supabase_client()
-                    
-                    save_count = 0
-                    for proj_code, changes in edits.items():
-                        update_payload = {}
-                        for col, new_val in changes.items():
-                            update_payload[col] = new_val
-                            flag_col = f"{col}_updated"
-                            if flag_col in current_df.columns:
-                                update_payload[flag_col] = True
-                        
-                        if update_payload:
-                            try:
-                                supabase.table('project_reports').update(update_payload).eq('project_code', proj_code).execute()
-                                save_count += 1
-                            except Exception as e:
-                                st.error(f"Error saving project {proj_code}: {e}")
-                    
-                    if save_count > 0:
-                        st.success(f"✅ Successfully saved {save_count} project(s).")
-                        # Refresh key to reload component with new data
-                        st.session_state['pu_react_refresh'] = st.session_state.get('pu_react_refresh', 0) + 1
-                        st.rerun()
+                    if update_payload:
+                        try:
+                            supabase.table('project_reports').update(update_payload).eq('project_code', proj_code).execute()
+                            save_count += 1
+                        except Exception as e:
+                            st.error(f"Error saving project {proj_code}: {e}")
+                
+                if save_count > 0:
+                    st.success(f"✅ Successfully saved {save_count} project(s).")
+                    # Refresh key to reload component with new data
+                    st.session_state['pu_react_refresh'] = st.session_state.get('pu_react_refresh', 0) + 1
+                    st.rerun()
 
         elif action == "open_export_modal":
             export_dialog(df)

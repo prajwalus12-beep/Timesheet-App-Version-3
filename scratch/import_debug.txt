@@ -1,4 +1,0 @@
-Dataframe columns: ['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello', 'Start Date', 'End Date', 'Phase', 'Prototype']
-Found start_date_col: Start Date, end_date_col: End Date
-Row 0: start_val='2026-05-05' -> '2026-05-05', end_val=nan -> None
-Row 1: start_val=nan -> None, end_val=nan -> None
