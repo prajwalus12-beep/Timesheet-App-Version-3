@@ -127,10 +127,8 @@ def render_sidebar(user):
         if user["role"] == "admin":
             options = ["📋  Timesheet", "🏢  Project", "📝  Project Update", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings"]
         else:
-            options = ["📋  Timesheet", "🏢  Project"]
-            # Only show Project Update if specifically granted access
-            if user.get("project_update_access"):
-                options.insert(2, "📝  Project Update")
+            # All employees can see Project Update (edit vs view-only controlled by access flag)
+            options = ["📋  Timesheet", "🏢  Project", "📝  Project Update"]
 
         page_map = {
             "📋  Timesheet": "Timesheet Entries",

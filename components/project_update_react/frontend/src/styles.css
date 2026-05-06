@@ -314,6 +314,14 @@
   padding: 0.5rem;
   vertical-align: middle;
 }
+
+.pu-spacer-row td {
+  height: 16px;
+  padding: 0 !important;
+  background-color: #f9fafb !important;
+  border: none !important;
+  pointer-events: none;
+}
 .pu-table td.num-col {
   padding: 0.75rem 1rem;
   font-size: 0.875rem;
@@ -357,6 +365,11 @@
   border-color: #fde68a;
 }
 
+.pu-cell-input.pu-highlight-empty {
+  border: 1px solid #fca5a5 !important;
+  background-color: transparent !important;
+}
+
 .pu-cell-input.name-field { font-weight: 600; color: #0f172a; }
 .pu-cell-input.priority-field {
   width: 4rem;
@@ -372,8 +385,35 @@
   min-width: 100px;
   font-size: 0.75rem;
   color: #64748b;
+  padding-right: 1.75rem; /* Space for the icon */
 }
 .pu-cell-input.date-field { color: #475569; }
+
+/* URL Input Wrapper */
+.pu-url-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.pu-input-url-btn {
+  position: absolute;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  color: #3b82f6;
+  background-color: #eff6ff;
+  border-radius: 0.25rem;
+  transition: all 150ms;
+}
+.pu-input-url-btn:hover {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+  transform: translateY(-1px);
+}
 
 .pu-cell-select {
   width: 100%;
@@ -402,6 +442,11 @@
 .pu-cell-select.db-updated {
   background-color: #fef3c7;
   border-color: #fde68a;
+}
+
+.pu-cell-select.pu-highlight-empty {
+  border: 1px solid #fca5a5 !important;
+  background-color: transparent !important;
 }
 
 .pu-cell-select.status-complete { color: #15803d; font-weight: 500; }

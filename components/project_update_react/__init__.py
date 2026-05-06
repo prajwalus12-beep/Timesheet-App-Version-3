@@ -18,7 +18,7 @@ else:
     )
 
 
-def project_update_component(projects, lead_engineers, phase_options=None, status_options=None, key=None):
+def project_update_component(projects, lead_engineers, phase_options=None, status_options=None, read_only=False, key=None):
     """
     Render the React-based Project Update table.
 
@@ -32,6 +32,8 @@ def project_update_component(projects, lead_engineers, phase_options=None, statu
         Phase dropdown options.
     status_options : list[str], optional
         Status dropdown options.
+    read_only : bool, optional
+        If True, prevents editing in the UI.
     key : str, optional
         Streamlit widget key.
 
@@ -52,6 +54,7 @@ def project_update_component(projects, lead_engineers, phase_options=None, statu
         lead_engineers=lead_engineers,
         phase_options=phase_options,
         status_options=status_options,
+        read_only=read_only,
         key=key,
         default=None,
     )

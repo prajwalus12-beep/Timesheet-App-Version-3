@@ -105,9 +105,17 @@ def export_dialog(df):
         )
 
 
-def render_project_update_page_v2():
+def render_project_update_page_v2(user):
     """Render the React-based Project Update page."""
     st.subheader("Project Update", divider="blue")
+
+    # Determine read-only status: Admins always edit, employees edit only if granted access
+    is_admin = user.get("role") == "admin"
+    has_edit_access = user.get("project_update_access", False)
+    read_only = not (is_admin or has_edit_access)
+
+    if read_only:
+        st.info("ℹ️ View-only mode. You do not have permission to edit project attributes.")
 
     # Fetch data from Supabase
     df = get_project_reports()
@@ -174,6 +182,7 @@ def render_project_update_page_v2():
         lead_engineers=lead_engineers,
         phase_options=phase_options,
         status_options=status_options,
+        read_only=read_only,
         key=f"pu_react_{st.session_state.get('pu_react_refresh', 0)}"
     )
 

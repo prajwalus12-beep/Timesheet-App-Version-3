@@ -6,8 +6,8 @@ def render_settings_page():
     """Render the administrative settings page for access control."""
     st.subheader("System Settings", divider="blue")
     
-    st.write("### Module Access Control")
-    st.caption("Manage which employees have access to the Project Update module.")
+    st.write("### Project Update Permissions")
+    st.caption("Control which employees are allowed to edit project attributes. All employees can still view the page.")
 
     # Fetch all users with their current project update access
     users_df = get_all_users()
@@ -65,12 +65,11 @@ def render_settings_page():
             
         with col2:
             current_access = bool(row['project_update_access'])
-            # Using key with employee_id to ensure state management is correct
-            new_access = st.toggle(
-                "Access", 
+            # Using checkbox as requested
+            new_access = st.checkbox(
+                "Allow Edit", 
                 value=current_access, 
-                key=f"access_{row['employee_id']}",
-                label_visibility="collapsed"
+                key=f"access_{row['employee_id']}"
             )
             
             if new_access != current_access:

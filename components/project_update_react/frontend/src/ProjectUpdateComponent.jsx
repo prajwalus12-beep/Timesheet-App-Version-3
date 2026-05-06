@@ -11,6 +11,7 @@ function ProjectUpdateComponent(props) {
   const leadEngineers = args.lead_engineers || [];
   const phaseOptions = args.phase_options || ["Analysis", "Design", "Development", "Testing", "Deployment", "Support"];
   const statusOptions = args.status_options || ["In progress", "Complete", "On hold", "Cancelled"];
+  const readOnly = args.read_only || false;
 
   // Local working copy of projects
   const [projects, setProjects] = useState(() => {
@@ -172,21 +173,27 @@ function ProjectUpdateComponent(props) {
   };
 
   // ---- Cell class helpers ----
-  const cellInputClass = (projectCode, field, extra = "") => {
+  const isFieldEmpty = (value) => {
+    return !value || value.toString().trim() === "";
+  };
+
+  const cellInputClass = (projectCode, field, value, extra = "") => {
     let cls = "pu-cell-input";
     if (extra) cls += " " + extra;
     if (isDirty(projectCode, field)) cls += " dirty";
     const proj = projects.find(p => p.project_code === projectCode);
     if (proj && !isDirty(projectCode, field) && isDbUpdated(proj, field)) cls += " db-updated";
+    if (isFieldEmpty(value)) cls += " pu-highlight-empty";
     return cls;
   };
 
-  const cellSelectClass = (projectCode, field, extra = "") => {
+  const cellSelectClass = (projectCode, field, value, extra = "") => {
     let cls = "pu-cell-select";
     if (extra) cls += " " + extra;
     if (isDirty(projectCode, field)) cls += " dirty";
     const proj = projects.find(p => p.project_code === projectCode);
     if (proj && !isDirty(projectCode, field) && isDbUpdated(proj, field)) cls += " db-updated";
+    if (isFieldEmpty(value)) cls += " pu-highlight-empty";
     return cls;
   };
 
@@ -216,7 +223,7 @@ function ProjectUpdateComponent(props) {
             <span className="pu-count-label">
               Showing {filteredProjects.length} of {projects.length} projects
             </span>
-            {editedCount > 0 && (
+            {!readOnly && editedCount > 0 && (
               <button className="pu-save-btn" onClick={handleSave}>
                 <Save size={16} /> Save Changes ({editedCount})
               </button>
@@ -228,7 +235,7 @@ function ProjectUpdateComponent(props) {
         </div>
 
         {/* Unsaved Changes Banner */}
-        {editedCount > 0 && (
+        {!readOnly && editedCount > 0 && (
           <div className="pu-unsaved-banner">
             <span>⚠ You have {editedCount} unsaved change(s).</span>
             <button className="pu-save-btn" onClick={handleSave} style={{padding: "0.35rem 0.75rem", fontSize: "0.8rem"}}>
@@ -368,21 +375,26 @@ function ProjectUpdateComponent(props) {
                       {/* Primary row */}
                       <tr className="pu-row-primary">
                         <td className="td-hash" rowSpan="3">{index + 1}</td>
-                        <td className="td-code" rowSpan="3">{project.project_code}</td>
+                        <td className="td-code" rowSpan="3">
+                          <b>{parseInt(project.project_code || "0", 10) + 1}</b>
+                        </td>
 
                         {/* Project Name */}
                         <td className="td-project-name">
                           <input type="text" value={project.project_name || ""}
                             onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
-                            className={cellInputClass(project.project_code, "project_name", "")}
-                            title={project.project_name || ""} />
+                            className={cellInputClass(project.project_code, "project_name", project.project_name)}
+                            disabled={readOnly}
+                            title={project.project_name || "Project Name is required"} />
                         </td>
 
                         {/* Lead Engineer */}
                         <td className="td-lead">
                           <select value={project.lead_engineer || ""}
                             onChange={(e) => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
-                            className={cellSelectClass(project.project_code, "lead_engineer")}>
+                            className={cellSelectClass(project.project_code, "lead_engineer", project.lead_engineer)}
+                            disabled={readOnly}
+                            title={!project.lead_engineer ? "Lead Engineer is not yet assigned" : ""}>
                             <option value="">Unassigned</option>
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
@@ -392,7 +404,8 @@ function ProjectUpdateComponent(props) {
                         <td className="td-status">
                           <select value={project.status || "In progress"}
                             onChange={(e) => handleUpdate(project.project_code, "status", e.target.value)}
-                            className={cellSelectClass(project.project_code, "status", statusClass(project.status))}>
+                            className={cellSelectClass(project.project_code, "status", project.status || "In progress")}
+                            disabled={readOnly}>
                             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </td>
@@ -401,7 +414,8 @@ function ProjectUpdateComponent(props) {
                         <td className="td-phase">
                           <select value={project.phase || "Analysis"}
                             onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
-                            className={cellSelectClass(project.project_code, "phase")}>
+                            className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis")}
+                            disabled={readOnly}>
                             {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
                           </select>
                         </td>
@@ -411,26 +425,40 @@ function ProjectUpdateComponent(props) {
                       <tr className="pu-row-secondary">
                         {/* Trello URL */}
                         <td className="td-trello">
-                          <input type="text" value={project.trello_link || ""}
-                            onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
-                            className={cellInputClass(project.project_code, "trello_link", "url-field")}
-                            placeholder="Trello URL" />
+                          <div className="pu-url-input-wrapper">
+                            <input type="text" value={project.trello_link || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field")}
+                              disabled={readOnly}
+                              placeholder="Trello URL"
+                              title={!project.trello_link ? "Trello URL is not yet filled" : ""} />
+                            {project.trello_link && (
+                              <a href={project.trello_link.startsWith('http') ? project.trello_link : `https://${project.trello_link}`} 
+                                 target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
+                          </div>
                         </td>
 
                         {/* Start Date */}
                         <td className="td-date">
                           <input type="date" value={project.start_date || ""}
                             onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                            className={cellInputClass(project.project_code, "start_date", "date-field")}
-                            placeholder="dd - mm - yyyy" />
+                            className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field")}
+                            disabled={readOnly}
+                            placeholder="dd - mm - yyyy"
+                            title={!project.start_date ? "Start Date is not yet filled" : ""} />
                         </td>
 
                         {/* End Date */}
                         <td className="td-date">
                           <input type="date" value={project.end_date || ""}
                             onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                            className={cellInputClass(project.project_code, "end_date", "date-field")}
-                            placeholder="dd - mm - yyyy" />
+                            className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field")}
+                            disabled={readOnly}
+                            placeholder="dd - mm - yyyy"
+                            title={!project.end_date ? "End Date is not yet filled" : ""} />
                         </td>
 
                         {/* Priority */}
@@ -438,8 +466,9 @@ function ProjectUpdateComponent(props) {
                           <input type="text" value={project.priority || ""}
                             onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
                             maxLength={4}
-                            className={cellInputClass(project.project_code, "priority", "priority-field")}
-                            title="Priority (e.g. 10)" />
+                            className={cellInputClass(project.project_code, "priority", project.priority, "priority-field")}
+                            disabled={readOnly}
+                            title={!project.priority ? "Priority is not yet filled" : "Priority (e.g. 10)"} />
                         </td>
                       </tr>
 
@@ -447,12 +476,27 @@ function ProjectUpdateComponent(props) {
                       <tr className="pu-row-tertiary">
                         {/* Prototype URL */}
                         <td className="td-prototype">
-                          <input type="text" value={project.prototype_link || ""}
-                            onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
-                            className={cellInputClass(project.project_code, "prototype_link", "url-field")}
-                            placeholder="Prototype URL" />
+                          <div className="pu-url-input-wrapper">
+                            <input type="text" value={project.prototype_link || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field")}
+                              disabled={readOnly}
+                              placeholder="Prototype URL"
+                              title={!project.prototype_link ? "Prototype URL is not yet filled" : ""} />
+                            {project.prototype_link && (
+                              <a href={project.prototype_link.startsWith('http') ? project.prototype_link : `https://${project.prototype_link}`} 
+                                 target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
+                          </div>
                         </td>
                         <td colSpan="3"></td>
+                      </tr>
+
+                      {/* Spacer row for record separation */}
+                      <tr className="pu-spacer-row">
+                        <td colSpan="6"></td>
                       </tr>
                     </React.Fragment>
                   ))
