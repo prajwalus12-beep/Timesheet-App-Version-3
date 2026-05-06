@@ -322,18 +322,19 @@
   border: none !important;
   pointer-events: none;
 }
-.pu-table td.num-col {
+.pu-table td.td-hash {
   padding: 0.75rem 1rem;
   font-size: 0.875rem;
   font-weight: 500;
   color: #94a3b8;
   text-align: center;
 }
-.pu-table td.code-col {
+.pu-table td.td-code {
   padding: 0.75rem 1rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #475569;
+  text-align: center;
 }
 
 /* ===== Table Cell Inputs ===== */
