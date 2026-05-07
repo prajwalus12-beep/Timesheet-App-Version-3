@@ -69,3 +69,7 @@ EXECUTE FUNCTION update_timestamp();
 
 
 CREATE INDEX idx_project_reports_code      ON project_reports(project_code);
+
+ALTER TABLE project_reports
+ADD COLUMN slack_link TEXT,
+ADD COLUMN slack_link_updated BOOLEAN NOT NULL DEFAULT FALSE;

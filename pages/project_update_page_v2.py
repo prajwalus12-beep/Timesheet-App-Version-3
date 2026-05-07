@@ -20,7 +20,8 @@ def _generate_excel_buffer(df, highlight_updated=False):
         'start_date': 'Start Date',
         'end_date': 'End Date',
         'phase': 'Phase',
-        'prototype_link': 'Prototype'
+        'prototype_link': 'Prototype',
+        'slack_link': 'Slack'
     }
     clean_df = df.copy()
     

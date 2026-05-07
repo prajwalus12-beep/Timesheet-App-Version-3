@@ -390,6 +390,20 @@
 }
 .pu-cell-input.date-field { color: #475569; }
 
+/* Read-only field (e.g. Slack URL) */
+.pu-cell-input.pu-readonly-field {
+  background-color: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+  cursor: not-allowed;
+  user-select: text;
+}
+.pu-cell-input.pu-readonly-field:hover { border-color: #e2e8f0; }
+.pu-cell-input.pu-readonly-field:focus { border-color: #e2e8f0; box-shadow: none; outline: none; }
+
+/* Slack URL column width */
+.td-slack { min-width: 160px; }
+
 /* URL Input Wrapper */
 .pu-url-input-wrapper {
   position: relative;

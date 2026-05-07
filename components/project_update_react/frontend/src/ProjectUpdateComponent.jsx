@@ -370,7 +370,8 @@ function ProjectUpdateComponent(props) {
                 </tr>
                 <tr>
                   <th className="th-sub"><Link size={12} className="th-sub-icon" /> PROTOTYPE URL</th>
-                  <th className="th-sub" colSpan="3"></th>
+                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> SLACK URL</th>
+                  <th className="th-sub" colSpan="2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -500,7 +501,33 @@ function ProjectUpdateComponent(props) {
                             )}
                           </div>
                         </td>
-                        <td colSpan="3"></td>
+
+                        {/* Slack URL — read-only display */}
+                        <td className="td-slack">
+                          <div className="pu-url-input-wrapper">
+                            <input
+                              type="text"
+                              value={project.slack_link || ""}
+                              readOnly
+                              className="pu-cell-input url-field pu-readonly-field"
+                              placeholder="Slack URL"
+                              title={project.slack_link ? project.slack_link : "Slack URL is not yet filled"}
+                            />
+                            {project.slack_link && (
+                              <a
+                                href={project.slack_link.startsWith('http') ? project.slack_link : `https://${project.slack_link}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="pu-input-url-btn"
+                                title="Open Slack Link"
+                              >
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+
+                        <td colSpan="2"></td>
                       </tr>
 
                       {/* Spacer row for record separation */}
