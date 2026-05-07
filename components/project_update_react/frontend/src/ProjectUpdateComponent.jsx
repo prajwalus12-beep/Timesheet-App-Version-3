@@ -69,7 +69,7 @@ function ProjectUpdateComponent(props) {
       if (filterPriority && (p.priority || "").toUpperCase() !== filterPriority.toUpperCase()) return false;
       if (filterPhase && p.phase !== filterPhase) return false;
       if (filterStatus && p.status !== filterStatus) return false;
-      
+
       const isComplete = p.status === "Complete";
       const hasUpdate = updatedFlagKeys.some(
         (k) => p[k] === true || p[k] === "true" || p[k] === "True"
@@ -85,7 +85,7 @@ function ProjectUpdateComponent(props) {
       }
 
       if (filterUpdatedOnly && !hasUpdate) return false;
-      
+
       return true;
     });
   }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriority, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
@@ -243,7 +243,7 @@ function ProjectUpdateComponent(props) {
         {!readOnly && editedCount > 0 && (
           <div className="pu-unsaved-banner">
             <span>⚠ You have {editedCount} unsaved change(s).</span>
-            <button className="pu-save-btn" onClick={handleSave} style={{padding: "0.35rem 0.75rem", fontSize: "0.8rem"}}>
+            <button className="pu-save-btn" onClick={handleSave} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>
               <Save size={14} /> Save
             </button>
           </div>
@@ -263,7 +263,7 @@ function ProjectUpdateComponent(props) {
               <div className="pu-filter-input-wrap">
                 <input
                   type="text"
-                  placeholder="e.g. Alpha Search..."
+                  placeholder="Search Project Name..."
                   value={filterName}
                   onChange={(e) => setFilterName(e.target.value)}
                   className="pu-filter-input has-icon"
@@ -296,9 +296,9 @@ function ProjectUpdateComponent(props) {
             {/* Priority */}
             <div className="pu-filter-group">
               <label className="pu-filter-label">Priority</label>
-              <input type="text" placeholder="e.g. P1, P10" value={filterPriority}
+              <input type="text" placeholder="e.g. 1 ,2" value={filterPriority}
                 onChange={(e) => setFilterPriority(e.target.value)}
-                className="pu-filter-input" style={{textTransform: "uppercase"}} />
+                className="pu-filter-input" style={{ textTransform: "uppercase" }} />
             </div>
 
             {/* Phase */}
@@ -325,7 +325,7 @@ function ProjectUpdateComponent(props) {
             {/* Quick Filters */}
             <div className="pu-filter-group pu-filter-group--full">
               <label className="pu-filter-label">Quick Filters</label>
-              <div style={{display: "flex", gap: "10px"}}>
+              <div style={{ display: "flex", gap: "10px" }}>
                 <button
                   className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
                   onClick={() => setFilterUpdatedOnly((v) => !v)}
@@ -337,10 +337,10 @@ function ProjectUpdateComponent(props) {
                 <button
                   className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
                   onClick={() => setFilterShowCompleted((v) => !v)}
-                  style={{borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : ""}}
+                  style={{ borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : "" }}
                   title="Show only completed projects"
                 >
-                  <span className="pu-updated-dot" style={{backgroundColor: filterShowCompleted ? "#10b981" : ""}} />
+                  <span className="pu-updated-dot" style={{ backgroundColor: filterShowCompleted ? "#10b981" : "" }} />
                   Completed Records
                 </button>
               </div>
@@ -387,13 +387,13 @@ function ProjectUpdateComponent(props) {
 
                         {/* Project Name */}
                         <td className="td-project-name">
-                          <textarea 
+                          <textarea
                             rows={2}
                             value={project.project_name || ""}
                             onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
                             className={cellInputClass(project.project_code, "project_name", project.project_name, "name-field")}
                             disabled={readOnly}
-                            title={project.project_name || "Project Name is required"} 
+                            title={project.project_name || "Project Name is required"}
                             style={{ resize: "none", overflow: "hidden", fontFamily: "inherit", minHeight: "3rem", lineHeight: "1.25" }}
                           />
                         </td>
@@ -443,8 +443,8 @@ function ProjectUpdateComponent(props) {
                               placeholder="Trello URL"
                               title={!project.trello_link ? "Trello URL is not yet filled" : ""} />
                             {project.trello_link && (
-                              <a href={project.trello_link.startsWith('http') ? project.trello_link : `https://${project.trello_link}`} 
-                                 target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
+                              <a href={project.trello_link.startsWith('http') ? project.trello_link : `https://${project.trello_link}`}
+                                target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
                                 <ExternalLink size={14} />
                               </a>
                             )}
@@ -494,8 +494,8 @@ function ProjectUpdateComponent(props) {
                               placeholder="Prototype URL"
                               title={!project.prototype_link ? "Prototype URL is not yet filled" : ""} />
                             {project.prototype_link && (
-                              <a href={project.prototype_link.startsWith('http') ? project.prototype_link : `https://${project.prototype_link}`} 
-                                 target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
+                              <a href={project.prototype_link.startsWith('http') ? project.prototype_link : `https://${project.prototype_link}`}
+                                target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
                                 <ExternalLink size={14} />
                               </a>
                             )}
