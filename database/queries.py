@@ -290,6 +290,13 @@ def _sanitize_dict(d):
     return {k: (None if pd.isna(v) else v) if not isinstance(v, str) else v
             for k, v in d.items()}
 
+def _normalize_code(code):
+    """Normalize project code by removing .0 suffixes (Excel artifact)."""
+    s = str(code).strip()
+    if s.endswith('.0'):
+        return s[:-2]
+    return s
+
 def import_projects(df):
     """Import projects using Supabase SDK. Updates existing projects by Job No."""
     supabase = get_supabase_client()
@@ -304,7 +311,7 @@ def import_projects(df):
         updated_count = 0
         new_count = 0
         for _, row in df.iterrows():
-            code = str(row.get('Job No') or row.get('Project Code') or '')
+            code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
             record = {
                 "project_code": code,
                 "project_name": encrypt_data(str(row.get('Project', ''))),
@@ -458,7 +465,7 @@ def import_project_updates(df):
         debug_log.append(f"Found start_date_col: {start_date_col}, end_date_col: {end_date_col}")
 
         for _, row in df.iterrows():
-            code = str(row.get('Job No') or row.get('Project Code') or '')
+            code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
             if not code or code.lower() == 'nan':
                 continue
 

@@ -106,6 +106,8 @@ def export_dialog(df):
         )
 
 
+from utils.lockout_helpers import get_lockout_schedule
+
 def render_project_update_page_v2(user):
     """Render the React-based Project Update page."""
     st.subheader("Project Update", divider="blue")
@@ -115,7 +117,17 @@ def render_project_update_page_v2(user):
     has_edit_access = user.get("project_update_access", False)
     read_only = not (is_admin or has_edit_access)
 
-    if read_only:
+    # --- Weekly Lockout Logic ---
+    lockout_schedule = get_lockout_schedule()
+    current_day = datetime.datetime.now().strftime("%a").upper()
+    
+    if not is_admin:
+        if lockout_schedule.get(current_day, False):
+            read_only = True
+            st.error(f"🔒 **Updates are locked for today ({current_day}).** According to the Weekly Lockout Schedule, you cannot make changes today.")
+    # ----------------------------
+
+    if read_only and not (not is_admin and lockout_schedule.get(current_day, False)):
         st.info("ℹ️ View-only mode. You do not have permission to edit project attributes.")
 
     # 1. Fetch Master Data

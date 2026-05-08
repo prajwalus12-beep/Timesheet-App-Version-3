@@ -382,7 +382,7 @@ function ProjectUpdateComponent(props) {
                       <tr className="pu-row-primary">
                         <td className="td-hash" rowSpan="3">{index + 1}</td>
                         <td className="td-code" rowSpan="3">
-                          <b>{parseInt(project.project_code || "0", 10) + 1}</b>
+                          <b>{project.project_code || ""}</b>
                         </td>
 
                         {/* Project Name */}

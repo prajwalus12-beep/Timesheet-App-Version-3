@@ -1,0 +1,11 @@
+{
+    "lockout_schedule": {
+        "SUN": false,
+        "MON": false,
+        "TUE": false,
+        "WED": false,
+        "THU": false,
+        "FRI": false,
+        "SAT": false
+    }
+}
