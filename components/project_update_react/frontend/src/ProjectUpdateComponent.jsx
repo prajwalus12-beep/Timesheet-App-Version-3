@@ -56,7 +56,7 @@ function ProjectUpdateComponent(props) {
   const updatedFlagKeys = [
     "project_name_updated", "lead_engineer_updated", "priority_updated",
     "status_updated", "trello_link_updated", "start_date_updated",
-    "end_date_updated", "phase_updated", "prototype_link_updated"
+    "end_date_updated", "phase_updated", "prototype_link_updated", "slack_link_updated"
   ];
 
   const filteredProjects = useMemo(() => {
@@ -152,7 +152,7 @@ function ProjectUpdateComponent(props) {
       const server = serverProjects.find((sp) => sp.project_code === p.project_code);
       if (!server) return;
       const changes = {};
-      const editableFields = ["project_name", "lead_engineer", "priority", "start_date", "end_date", "status", "phase", "trello_link", "prototype_link"];
+      const editableFields = ["project_name", "lead_engineer", "priority", "start_date", "end_date", "status", "phase", "trello_link", "prototype_link", "slack_link"];
       editableFields.forEach((f) => {
         if (String(server[f] ?? "") !== String(p[f] ?? "")) {
           changes[f] = p[f];
@@ -502,16 +502,17 @@ function ProjectUpdateComponent(props) {
                           </div>
                         </td>
 
-                        {/* Slack URL — read-only display */}
+                        {/* Slack URL */}
                         <td className="td-slack">
                           <div className="pu-url-input-wrapper">
                             <input
                               type="text"
                               value={project.slack_link || ""}
-                              readOnly
-                              className="pu-cell-input url-field pu-readonly-field"
+                              onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field")}
+                              disabled={readOnly}
                               placeholder="Slack URL"
-                              title={project.slack_link ? project.slack_link : "Slack URL is not yet filled"}
+                              title={!project.slack_link ? "Slack URL is not yet filled" : ""}
                             />
                             {project.slack_link && (
                               <a

@@ -445,7 +445,7 @@ def import_project_updates(df):
     try:
         # Fetch existing records for comparison (only the fields we need to diff)
         existing_res = supabase.table('project_reports').select(
-            'project_code, project_name, lead_engineer, priority, status, trello_link, start_date, end_date'
+            'project_code, project_name, lead_engineer, priority, status, trello_link, start_date, end_date, prototype_link, slack_link'
         ).execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
@@ -499,6 +499,8 @@ def import_project_updates(df):
                 "priority": str(row.get('Job Priority', '')),
                 "status": str(row.get('Status', 'In progress')),
                 "trello_link": str(row.get('Trello', '')) if pd.notna(row.get('Trello')) else None,
+                "slack_link": str(row.get('Slack', '')) if pd.notna(row.get('Slack')) else None,
+                "prototype_link": str(row.get('Prototype', '')) if pd.notna(row.get('Prototype')) else None,
                 "start_date": start_date,
                 "end_date": end_date,
                 "project_code_updated": False,
@@ -507,6 +509,7 @@ def import_project_updates(df):
                 "priority_updated": False,
                 "status_updated": False,
                 "trello_link_updated": False,
+                "slack_link_updated": False,
                 "start_date_updated": False,
                 "end_date_updated": False,
                 "phase_updated": False,
@@ -533,6 +536,10 @@ def import_project_updates(df):
                     changes.append('start_date')
                 if clean_record.get('end_date') != existing.get('end_date'):
                     changes.append('end_date')
+                if clean_record.get('prototype_link') != existing.get('prototype_link'):
+                    changes.append('prototype_link')
+                if clean_record.get('slack_link') != existing.get('slack_link'):
+                    changes.append('slack_link')
                 if changes:
                     # Import is restoring canonical data — clear ALL highlight
                     # flags instead of setting them (this is not a manual edit).
@@ -559,6 +566,7 @@ def import_project_updates(df):
                 "priority_updated": False,
                 "status_updated": False,
                 "trello_link_updated": False,
+                "slack_link_updated": False,
                 "start_date_updated": False,
                 "end_date_updated": False,
                 "phase_updated": False,

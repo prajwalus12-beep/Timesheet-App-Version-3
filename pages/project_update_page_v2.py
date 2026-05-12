@@ -112,6 +112,14 @@ def render_project_update_page_v2(user):
     """Render the React-based Project Update page."""
     st.subheader("Project Update", divider="blue")
 
+    # Show persistent success message from import if it exists
+    if "import_success_msg" in st.session_state:
+        st.success(st.session_state["import_success_msg"])
+        # We don't delete it immediately so the user can see it on the page they just landed on
+        # But we'll clear it after the next rerun or if they stay here.
+        # Actually, let's clear it now so it only shows once.
+        del st.session_state["import_success_msg"]
+
     # Determine read-only status: Admins always edit, employees edit only if granted access
     is_admin = user.get("role") == "admin"
     has_edit_access = user.get("project_update_access", False)
@@ -157,10 +165,16 @@ def render_project_update_page_v2(user):
         for col in df.columns:
             if col == 'lead_engineer_clean': continue
             val = row[col]
-            if pd.isna(val) or str(val).strip().lower() == 'nan':
+            if pd.isna(val) or str(val).strip().lower() in ('nan', 'none', 'nat', ''):
                 record[col] = None
             elif hasattr(val, 'isoformat'):
-                record[col] = val.isoformat() if val is not None else None
+                record[col] = val.isoformat()
+            elif col in ['start_date', 'end_date']:
+                # Ensure date strings are in YYYY-MM-DD for the HTML5 date input
+                try:
+                    record[col] = pd.to_datetime(val).date().isoformat()
+                except Exception:
+                    record[col] = str(val)
             elif isinstance(val, bool):
                 record[col] = val
             else:
