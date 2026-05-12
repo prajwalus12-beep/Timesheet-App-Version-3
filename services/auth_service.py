@@ -5,7 +5,7 @@ import json
 import secrets
 import string
 from cryptography.fernet import Fernet
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 FIXED_PASSWORD = "NyT@i9Us!Q7kLm2Z"
 
@@ -86,21 +86,25 @@ def login_user(username, password):
     from database.queries import get_user_by_username, update_user_lockout
     user_record = get_user_by_username(username)
     if user_record:
+        # Tuple: (id, employee_id, username, password, failed_attempts, locked_until, access)
         uid, emp_id, uname, db_pw, failed, locked_until, access = user_record
+        
+        now = datetime.now(timezone.utc)
         
         # Convert string timestamp to datetime object if needed
         if isinstance(locked_until, str):
             try:
-                # Handle potential formats: '2026-03-11 04:11:08.018048' or ISO format
                 if ' ' in locked_until:
-                    locked_until = datetime.strptime(locked_until.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    locked_until = datetime.strptime(locked_until.split('.')[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 else:
-                    locked_until = datetime.fromisoformat(locked_until)
+                    locked_until = datetime.fromisoformat(locked_until).replace(tzinfo=timezone.utc)
             except:
                 locked_until = None
+        elif locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
 
-        if locked_until and datetime.utcnow() < locked_until:
-            wait = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
+        if locked_until and now < locked_until:
+            wait = int((locked_until - now).total_seconds() / 60) + 1
             return {"error": f"⚠️ Account locked for security. Please try again in {wait} min."}
         
         if verify_password(password, db_pw):
@@ -109,12 +113,12 @@ def login_user(username, password):
                 "id": uid, 
                 "employee_id": emp_id, 
                 "username": uname, 
-                "role": "admin" if uname in ["admin", "System Administrator"] else "employee",
-                "project_update_access": user_record[6] if len(user_record) > 6 else False
+                "role": "admin" if uname.lower() in ["admin", "system administrator"] else "employee",
+                "project_update_access": access
             }
         else:
             new_failed = failed + 1
-            lockout = datetime.utcnow() + timedelta(minutes=15) if new_failed >= 5 else None
+            lockout = now + timedelta(minutes=15) if new_failed >= 5 else None
             update_user_lockout(username, new_failed, lockout)
             if lockout: return {"error": "🚫 Too many failed attempts. Your account is locked for 15 minutes."}
             return {"error": f"❌ Invalid password. Attempt {new_failed}/5."}
@@ -122,29 +126,40 @@ def login_user(username, password):
 
 def get_session_metadata():
     """Helper to extract browser metadata for session binding."""
-    try:
-        # st.context.headers is the modern way (Streamlit 1.35+)
-        # If it exists, use it and return immediately to avoid any deprecated imports
-        if hasattr(st, "context"):
-            try:
-                headers = st.context.headers
-                if headers:
-                    return {
-                        "ua": headers.get("User-Agent", "unknown"),
-                        "ip": headers.get("X-Forwarded-For", "127.0.0.1").split(',')[0].strip()
-                    }
-            except AttributeError:
-                pass
+    headers = {}
+    
+    # 1. Modern way (Streamlit 1.35+)
+    if hasattr(st, "context"):
+        try:
+            headers = st.context.headers
+        except Exception:
+            pass
 
-        # Fallback for older versions - only import if modern way failed
-        from streamlit.web.server.websocket_headers import _get_websocket_headers
-        headers = _get_websocket_headers()
-        return {
-            "ua": headers.get("User-Agent", "unknown"),
-            "ip": headers.get("X-Forwarded-For", "127.0.0.1").split(',')[0].strip()
-        }
-    except:
+    # 2. Legacy fallback for older versions
+    if not headers:
+        try:
+            # pyrefly: ignore [missing-import]
+            from streamlit.web.server.websocket_headers import _get_websocket_headers
+            headers = _get_websocket_headers()
+        except (ImportError, Exception):
+            pass
+
+    if not headers:
         return {"ua": "unknown", "ip": "127.0.0.1"}
+
+    # Extract IP robustly (handling proxies)
+    ip_headers = ['X-Forwarded-For', 'X-Real-IP', 'True-Client-IP']
+    ip = "127.0.0.1"
+    for h in ip_headers:
+        val = headers.get(h)
+        if val:
+            ip = val.split(',')[0].strip()
+            break
+            
+    return {
+        "ua": headers.get("User-Agent", "unknown"),
+        "ip": ip
+    }
 
 def create_session_token(user_data):
     """Create an encrypted session token with expiration and device binding."""
@@ -154,12 +169,12 @@ def create_session_token(user_data):
             meta = get_session_metadata()
             payload = {
                 "user": user_data,
-                "exp": (datetime.utcnow() + timedelta(hours=24)).timestamp(),
+                "exp": (datetime.now(timezone.utc) + timedelta(hours=24)).timestamp(),
                 "ua": meta["ua"],
                 "ip": meta["ip"]
             }
             return f.encrypt(json.dumps(payload).encode()).decode()
-    except:
+    except Exception:
         pass
     return None
 
@@ -171,7 +186,7 @@ def restore_session_from_token(token):
             payload = json.loads(f.decrypt(token.encode()).decode())
             
             # 1. Check expiration
-            if datetime.utcnow().timestamp() > payload.get("exp", 0):
+            if datetime.now(timezone.utc).timestamp() > payload.get("exp", 0):
                 return None
             
             # 2. Check Device Binding (User-Agent must match)
@@ -179,13 +194,8 @@ def restore_session_from_token(token):
             if payload.get("ua") != meta["ua"]:
                 return None
             
-            # 3. Check IP (only if not localhost)
-            # Note: IP can be prone to change, so we mostly rely on UA + Exp
-            # if meta["ip"] != "127.0.0.1" and payload.get("ip") != meta["ip"]:
-            #     return None
-                
             return payload.get("user")
-    except:
+    except Exception:
         pass
     return None
 

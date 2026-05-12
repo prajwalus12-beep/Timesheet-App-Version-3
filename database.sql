@@ -73,3 +73,7 @@ ON CONFLICT (username) DO NOTHING;
 -- ADD COLUMN priority VARCHAR(50),
 -- ADD COLUMN lead_engineer VARCHAR(255),
 -- ADD COLUMN trello_link TEXT;
+
+-- ALTER TIMESHEET TABLE
+ALTER TABLE timesheet
+ADD COLUMN comment VARCHAR(400);

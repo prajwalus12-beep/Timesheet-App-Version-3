@@ -98,7 +98,7 @@ def get_employee_by_id(emp_id):
     res = supabase.table('employee').select('*').eq('employee_id', emp_id).execute()
     return res.data[0] if res.data else None
 
-def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hours, phase, project_status="Not started"):
+def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hours, phase, project_status="Not started", comment=""):
     """Insert a new timesheet entry using Supabase SDK."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -114,7 +114,8 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
         "date": date.isoformat() if hasattr(date, 'isoformat') else date,
         "hours": float(hours),
         "Phase": phase_code,
-        "project_status": project_status
+        "project_status": project_status,
+        "comment": comment.strip()[:400] if comment else None
     }
     
     try:
@@ -128,7 +129,7 @@ def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=Non
     supabase = get_supabase_client()
     if not supabase: return pd.DataFrame()
     
-    query = supabase.table('timesheet').select('id, emp_id, emp_name, project_code, project_name, date, hours, Phase, project_status')
+    query = supabase.table('timesheet').select('id, emp_id, emp_name, project_code, project_name, date, hours, Phase, project_status, comment')
     
     if start_date: query = query.gte('date', start_date.isoformat() if hasattr(start_date, 'isoformat') else start_date)
     if end_date: query = query.lte('date', end_date.isoformat() if hasattr(end_date, 'isoformat') else end_date)
@@ -141,7 +142,7 @@ def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=Non
     if not data: return pd.DataFrame()
     
     # Decrypt project names
-    cols = ['id', 'emp_id', 'emp_name', 'project_code', 'project_name', 'date', 'hours', 'Phase', 'project_status']
+    cols = ['id', 'emp_id', 'emp_name', 'project_code', 'project_name', 'date', 'hours', 'Phase', 'project_status', 'comment']
     rows = []
     for r in data:
         rows.append([
@@ -153,7 +154,8 @@ def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=Non
             r['date'],
             r['hours'],
             r['Phase'],
-            r['project_status']
+            r['project_status'],
+            r.get('comment', '')
         ])
     
     return pd.DataFrame(rows, columns=cols)
@@ -169,7 +171,7 @@ def delete_timesheet_entry(entry_id):
     except Exception as e:
         return False, str(e)
 
-def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_name, date, hours, phase, project_status):
+def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_name, date, hours, phase, project_status, comment=""):
     """Update a timesheet entry using Supabase SDK."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -185,7 +187,8 @@ def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_nam
         "date": date.isoformat() if hasattr(date, 'isoformat') else date,
         "hours": float(hours),
         "Phase": phase_code,
-        "project_status": project_status
+        "project_status": project_status,
+        "comment": comment.strip()[:400] if comment else None
     }
     
     try:

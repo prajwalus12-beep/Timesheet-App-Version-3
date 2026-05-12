@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import time
 import json
+import pandas as pd
 import streamlit.components.v1 as components
 from database.queries import get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password, update_user_password
 from services.auth_service import is_password_strong, encrypt_data
@@ -172,11 +173,18 @@ def entry_form_dialog(user, emp_options, current_emp_id):
         entry_proj_key = selected_key
         # -----------------------------------------------
         
+        # Add Entry Form - Comment is mandatory
+        entry_comment = st.text_area("Comment", max_chars=400, placeholder="Enter work details, update summary, or notes...", key="entry_comment_modal")
+        
         entry_phase = st.selectbox("Phase", ["Analysis", "Design", "Development", "Testing", "Deployement", "Support"], key="entry_phase_modal")
         
         submit_entry = st.button("Submit Entry", type="primary")
         
         if submit_entry:
+            # Validation: Comment must not be empty after stripping whitespace
+            if not entry_comment.strip():
+                st.warning("Comment is required. Please provide details before submitting.")
+                st.stop()
             if not entry_date or entry_date > end_of_week:
                 st.warning("Cannot submit entry for a future week date.")
             elif entry_hours <= 0:
@@ -187,10 +195,67 @@ def entry_form_dialog(user, emp_options, current_emp_id):
                 proj_data = all_proj_options[entry_proj_key]
                 e_id = emp_options[entry_emp]
                 e_name = entry_emp.split(" (")[0] 
-                add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2])
+                add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
                 st.session_state.pop('_entry_selected_proj_key', None)
                 st.success("Entry Added!")
                 st.rerun()
+
+@st.dialog("Add Multiple Entries")
+def multiple_entry_dialog(user, emp_labels, current_emp_id):
+    """Dialog to add multiple timesheet entries at once.
+    The user can specify how many rows to add, then fill each row's fields.
+    All rows are submitted in a single batch.
+    """
+    st.write("## Add Multiple Timesheet Entries")
+    num_rows = st.number_input("Number of entries", min_value=1, max_value=20, value=2, step=1)
+    entries = []
+    for i in range(int(num_rows)):
+        st.markdown(f"### Entry {i+1}")
+        # Employee selection – same as single entry
+        entry_emp = st.selectbox(f"Employee {i+1}", list(emp_labels.keys()), key=f"mult_emp_{i}")
+        # Project selection – reuse project picker logic (simplified)
+        all_projs = get_all_projects()
+        proj_options = {f"{r['project_code']} - {r['project_name']}": (r['project_code'], r['project_name'], r.get('status','')) for _, r in all_projs.iterrows()}
+        proj_key = st.selectbox(f"Project {i+1}", list(proj_options.keys()), key=f"mult_proj_{i}")
+        # Date, Hours, Phase, Comment
+        today = datetime.date.today()
+        end_of_week = today + datetime.timedelta(days=(6 - today.weekday()))
+        entry_date = st.date_input(f"Date {i+1}", max_value=end_of_week, key=f"mult_date_{i}")
+        entry_hours = st.number_input(f"Hours {i+1}", min_value=0.0, max_value=24.0, step=0.5, key=f"mult_hours_{i}")
+        phase_options = ["Analysis", "Design", "Development", "Testing", "Deployement", "Support"]
+        entry_phase = st.selectbox(f"Phase {i+1}", phase_options, key=f"mult_phase_{i}")
+        entry_comment = st.text_area(f"Comment {i+1}", max_chars=400, placeholder="Enter work details...", key=f"mult_comment_{i}")
+        entries.append({
+            "emp_key": entry_emp,
+            "proj_key": proj_key,
+            "date": entry_date,
+            "hours": entry_hours,
+            "phase": entry_phase,
+            "comment": entry_comment,
+        })
+    if st.button("Submit All Entries", type="primary"):
+        # Validate all entries
+        for idx, e in enumerate(entries):
+            if not e["comment"].strip():
+                st.warning(f"Entry {idx+1}: Comment is required.")
+                st.stop()
+            if e["date"] > end_of_week:
+                st.warning(f"Entry {idx+1}: Date cannot be in future week.")
+                st.stop()
+            if e["hours"] <= 0:
+                st.warning(f"Entry {idx+1}: Hours must be > 0.")
+                st.stop()
+            if e["proj_key"] == "None":
+                st.warning(f"Entry {idx+1}: Project not selected.")
+                st.stop()
+        # All validations passed – insert rows
+        for e in entries:
+            proj_data = proj_options[e["proj_key"]]
+            e_id = emp_labels[e["emp_key"]]
+            e_name = e["emp_key"].split(" (")[0]
+            add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], e["date"], e["hours"], e["phase"], proj_data[2], e["comment"])
+        st.success(f"Added {len(entries)} entries successfully!")
+        st.rerun()
 
 @st.dialog("Edit Entry")
 def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
@@ -333,6 +398,11 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
         entry_proj_key = selected_key
         # -----------------------------------------------
         
+        current_comment = entry_data.get('comment', '') if pd.notna(entry_data.get('comment', '')) else ''
+        
+        # Edit Entry Form - Comment is mandatory
+        entry_comment = st.text_area("Comment", value=current_comment, max_chars=400, placeholder="Enter work details, update summary, or notes...", key="edit_comment_modal")
+        
         phase_options = ["Analysis", "Design", "Development", "Testing", "Deployement", "Support"]
         phase_map = {"Analysis": "1", "Design": "2", "Development": "3", "Testing": "4", "Deployement": "5", "Support": "6"}
         rev_phase_map = {v: k for k, v in phase_map.items()}
@@ -342,6 +412,10 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
 
         submit_update = st.button("Update Entry", type="primary")
         if submit_update:
+            # Validation: Comment must not be empty after stripping whitespace
+            if not entry_comment.strip():
+                st.warning("Comment is required to update the entry.")
+                st.stop()
             if not entry_date or entry_date > end_of_week:
                 st.warning("Cannot update entry to a future week date.")
             elif entry_hours <= 0:
@@ -352,7 +426,7 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
                 proj_data = all_proj_options[entry_proj_key]
                 e_id = emp_options[entry_emp]
                 e_name = entry_emp.split(" (")[0] 
-                update_timesheet_entry(entry_data['id'], e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2])
+                update_timesheet_entry(entry_data['id'], e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
                 st.session_state.pop('_edit_selected_proj_key', None)
                 st.success("Entry Updated!")
                 st.rerun()
