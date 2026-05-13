@@ -125,15 +125,15 @@ def render_sidebar(user):
 
         # --- Navigation Menu using radio ---
         if user["role"] == "admin":
-            options = ["📋  Timesheet", "🏢  Project", "📝  Project Update", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings"]
+            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings"]
         else:
             # All employees can see Project Update (edit vs view-only controlled by access flag)
-            options = ["📋  Timesheet", "🏢  Project", "📝  Project Update"]
+            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2"]
 
         page_map = {
             "📋  Timesheet": "Timesheet Entries",
-            "🏢  Project": "Projects",
-            "📝  Project Update": "Project Update",
+            "🏢  Project V1": "Projects",
+            "📝  Project Update V2": "Project Update",
             "👥  Employee": "Employees",
             "📊  Report": "Reports",
             "📥  Import": "Import Data",

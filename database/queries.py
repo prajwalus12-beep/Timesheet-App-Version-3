@@ -115,7 +115,7 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
         "hours": float(hours),
         "Phase": phase_code,
         "project_status": project_status,
-        "comment": comment.strip()[:400] if comment else None
+        "comment": str(comment).strip()[:400] if pd.notna(comment) and str(comment).strip() else None
     }
     
     try:
@@ -188,7 +188,7 @@ def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_nam
         "hours": float(hours),
         "Phase": phase_code,
         "project_status": project_status,
-        "comment": comment.strip()[:400] if comment else None
+        "comment": str(comment).strip()[:400] if pd.notna(comment) and str(comment).strip() else None
     }
     
     try:
@@ -437,72 +437,82 @@ def _parse_date_value(val):
         return s  # return as-is if unparseable
 
 
+def _parse_checkbox_value(val):
+    """Convert Excel checkbox values (1, TRUE, '1', 'x') to 1 or None."""
+    if pd.isna(val):
+        return None
+    s = str(val).strip().lower()
+    if s in ('1', '1.0', 'true', 'x', 'yes', 'checked'):
+        return 1
+    return None
+
+def _parse_int_value(val):
+    """Safely convert Excel numeric values to int or None."""
+    if pd.isna(val):
+        return None
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return None
+
 def import_project_updates(df):
     """Import project updates into project_reports using Supabase SDK."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
     try:
-        # Fetch existing records for comparison (only the fields we need to diff)
-        existing_res = supabase.table('project_reports').select(
-            'project_code, project_name, lead_engineer, priority, status, trello_link, start_date, end_date, prototype_link, slack_link'
-        ).execute()
+        # Fetch existing records for comparison
+        existing_res = supabase.table('project_reports').select('*').execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
         inserts = []
         updates = []
         resets = []   # records that match import — clear all *_updated flags
         
-        # Robustly identify column names for start/end date
-        start_date_col = None
-        end_date_col = None
-        
-        debug_log = [f"Dataframe columns: {list(df.columns)}"]
-        
-        for col in df.columns:
-            clean_col = str(col).strip().lower().replace('_', ' ')
-            if clean_col in ['start date', 'startdate', 'date start']:
-                start_date_col = col
-            elif clean_col in ['end date', 'enddate', 'date finish', 'date end']:
-                end_date_col = col
-        debug_log.append(f"Found start_date_col: {start_date_col}, end_date_col: {end_date_col}")
+        # Mapping of Excel columns to DB fields
+        col_map = {
+            'Job No': 'project_code',
+            'Job Priority': 'priority',
+            'Project': 'project_name',
+            'Status': 'status',
+            'Lead engineer': 'lead_engineer',
+            'Trello': 'trello_link',
+            'Start Date': 'start_date',
+            'End Date': 'end_date',
+            'Phase': 'phase',
+            'Prototype': 'prototype_link',
+            'Slack': 'slack_link',
+            'Estimated Days': 'estimated_days',
+            'CheckBoxe BC': 'checkbox_bc',
+            'CheckBoxe Trello': 'checkbox_trello',
+            'CheckBoxe WA': 'checkbox_wa',
+            'CheckBoxe WS': 'checkbox_ws'
+        }
 
         for _, row in df.iterrows():
             code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
             if not code or code.lower() == 'nan':
                 continue
 
-            # Parse date fields from the Excel row using discovered column names
-            start_date_val = row[start_date_col] if start_date_col and start_date_col in row else None
-            end_date_val = row[end_date_col] if end_date_col and end_date_col in row else None
-            
-            start_date = _parse_date_value(start_date_val)
-            end_date   = _parse_date_value(end_date_val)
-            
-            if _ < 5: # Log first 5 rows for debugging
-                debug_log.append(f"Row {_}: start_val={start_date_val!r} -> {start_date!r}, end_val={end_date_val!r} -> {end_date!r}")
-            
-            # Write debug log to file so the assistant can read it
-            import os
-            try:
-                os.makedirs("scratch", exist_ok=True)
-                with open("scratch/import_debug.txt", "w", encoding="utf-8") as f:
-                    f.write("\n".join(debug_log))
-            except Exception:
-                pass
-            
-            # Build record with default flags set to False
+            # Build record
             record = {
                 "project_code": code,
-                "project_name": str(row.get('Project', '')),
-                "lead_engineer": str(row.get('Lead engineer', '')),
-                "priority": str(row.get('Job Priority', '')),
-                "status": str(row.get('Status', 'In progress')),
+                "project_name": str(row.get('Project', '')) if pd.notna(row.get('Project')) else "",
+                "priority": _parse_int_value(row.get('Job Priority')),
+                "status": str(row.get('Status', 'In progress')) if pd.notna(row.get('Status')) else 'In progress',
+                "lead_engineer": str(row.get('Lead engineer', '')) if pd.notna(row.get('Lead engineer')) else "",
                 "trello_link": str(row.get('Trello', '')) if pd.notna(row.get('Trello')) else None,
-                "slack_link": str(row.get('Slack', '')) if pd.notna(row.get('Slack')) else None,
+                "start_date": _parse_date_value(row.get('Start Date')),
+                "end_date": _parse_date_value(row.get('End Date')),
+                "phase": str(row.get('Phase', 'Analysis')) if pd.notna(row.get('Phase')) else 'Analysis',
                 "prototype_link": str(row.get('Prototype', '')) if pd.notna(row.get('Prototype')) else None,
-                "start_date": start_date,
-                "end_date": end_date,
+                "slack_link": str(row.get('Slack', '')) if pd.notna(row.get('Slack')) else None,
+                "estimated_days": _parse_int_value(row.get('Estimated Days')),
+                "checkbox_bc": _parse_checkbox_value(row.get('CheckBoxe BC')),
+                "checkbox_trello": _parse_checkbox_value(row.get('CheckBoxe Trello')),
+                "checkbox_wa": _parse_checkbox_value(row.get('CheckBoxe WA')),
+                "checkbox_ws": _parse_checkbox_value(row.get('CheckBoxe WS')),
+                # Default ALL flags to False to clear highlights on import
                 "project_code_updated": False,
                 "project_name_updated": False,
                 "lead_engineer_updated": False,
@@ -513,52 +523,56 @@ def import_project_updates(df):
                 "start_date_updated": False,
                 "end_date_updated": False,
                 "phase_updated": False,
-                "prototype_link_updated": False
+                "prototype_link_updated": False,
+                "estimated_days_updated": False,
+                "checkbox_bc_updated": False,
+                "checkbox_trello_updated": False,
+                "checkbox_wa_updated": False,
+                "checkbox_ws_updated": False
             }
             clean_record = _sanitize_dict(record)
             
             if code in existing_map:
-                # Compare with existing record to see if any field changed
                 existing = existing_map[code]
-                changes = []
-                # Compare each relevant field
-                if clean_record.get('project_name') != existing.get('project_name'):
-                    changes.append('project_name')
-                if clean_record.get('lead_engineer') != existing.get('lead_engineer'):
-                    changes.append('lead_engineer')
-                if clean_record.get('priority') != existing.get('priority'):
-                    changes.append('priority')
-                if clean_record.get('status') != existing.get('status'):
-                    changes.append('status')
-                if clean_record.get('trello_link') != existing.get('trello_link'):
-                    changes.append('trello_link')
-                if clean_record.get('start_date') != existing.get('start_date'):
-                    changes.append('start_date')
-                if clean_record.get('end_date') != existing.get('end_date'):
-                    changes.append('end_date')
-                if clean_record.get('prototype_link') != existing.get('prototype_link'):
-                    changes.append('prototype_link')
-                if clean_record.get('slack_link') != existing.get('slack_link'):
-                    changes.append('slack_link')
-                if changes:
-                    # Import is restoring canonical data — clear ALL highlight
-                    # flags instead of setting them (this is not a manual edit).
+                # Check if any data field changed (excluding flags)
+                data_fields = [
+                    'project_name', 'priority', 'status', 'lead_engineer', 'trello_link',
+                    'start_date', 'end_date', 'phase', 'prototype_link', 'slack_link',
+                    'estimated_days', 'checkbox_bc', 'checkbox_trello', 'checkbox_wa', 'checkbox_ws'
+                ]
+                changed = False
+                for f in data_fields:
+                    val_import = clean_record.get(f)
+                    val_db = existing.get(f)
+                    
+                    # Normalize for comparison
+                    def _normalize_for_cmp(v):
+                        if v is None: return None
+                        try:
+                            # If it's a number, convert 9.0 -> 9
+                            f_v = float(v)
+                            if f_v == int(f_v): return str(int(f_v))
+                            return str(f_v)
+                        except (ValueError, TypeError):
+                            return str(v).strip()
+
+                    if _normalize_for_cmp(val_import) != _normalize_for_cmp(val_db):
+                        changed = True
+                        break
+                
+                if changed:
                     updates.append(clean_record)
                 else:
-                    # No field changes → import confirms data matches; clear any existing highlight flags
                     resets.append(code)
             else:
-                # New record – set a default phase and mark as insert
-                clean_record["phase"] = "Analysis"
                 inserts.append(clean_record)
+
         if inserts:
             supabase.table('project_reports').insert(inserts).execute()
         if updates:
             for u in updates:
                 supabase.table('project_reports').update(u).eq('project_code', u['project_code']).execute()
         if resets:
-            # Clear all *_updated flags for records that exactly match the imported sheet
-            # Use a single batched call instead of per-record loop to avoid socket exhaustion
             reset_payload = {
                 "project_code_updated": False,
                 "project_name_updated": False,
@@ -570,9 +584,15 @@ def import_project_updates(df):
                 "start_date_updated": False,
                 "end_date_updated": False,
                 "phase_updated": False,
-                "prototype_link_updated": False
+                "prototype_link_updated": False,
+                "estimated_days_updated": False,
+                "checkbox_bc_updated": False,
+                "checkbox_trello_updated": False,
+                "checkbox_wa_updated": False,
+                "checkbox_ws_updated": False
             }
             supabase.table('project_reports').update(reset_payload).in_('project_code', resets).execute()
+            
         return True, f"Successfully imported {len(inserts)} new, updated {len(updates)} changed, and cleared highlights for {len(resets)} matched project(s)."
     except Exception as e:
         return False, str(e)

@@ -21,7 +21,12 @@ def _generate_excel_buffer(df, highlight_updated=False):
         'end_date': 'End Date',
         'phase': 'Phase',
         'prototype_link': 'Prototype',
-        'slack_link': 'Slack'
+        'slack_link': 'Slack',
+        'estimated_days': 'Estimated Days',
+        'checkbox_bc': 'CheckBoxe BC',
+        'checkbox_trello': 'CheckBoxe Trello',
+        'checkbox_wa': 'CheckBoxe WA',
+        'checkbox_ws': 'CheckBoxe WS'
     }
     clean_df = df.copy()
     
@@ -140,6 +145,21 @@ def render_project_update_page_v2(user):
 
     # 1. Fetch Master Data
     df = get_project_reports()
+
+    # Calculate Last Modified Time from updated_at column
+    last_mod_str = "Unknown"
+    if not df.empty and 'updated_at' in df.columns:
+        try:
+            max_updated = pd.to_datetime(df['updated_at']).max()
+            if pd.notna(max_updated):
+                # Format: 13-05-2026 18:30
+                last_mod_str = max_updated.strftime("%d-%m-%Y %H:%M")
+        except Exception:
+            pass
+    
+    # Display the timestamp with consistent styling
+    st.markdown(f"<p style='color: #6B7280; font-size: 0.92rem; margin-top: -15px; margin-bottom: 20px;'>Last Modified: <span style='color: #2563EB; font-weight: 600;'>{last_mod_str}</span></p>", unsafe_allow_html=True)
+
     all_emps = get_all_employees()
     valid_emp_names = set(str(n).strip() for n in all_emps['employee_name'].dropna())
 
@@ -200,15 +220,8 @@ def render_project_update_page_v2(user):
     
     # Use fixed status options from the provided screenshot
     status_options = [
-        "Not started",
-        "Awaiting Info",
-        "At Beta",
-        "In progress",
-        "In testing",
-        "Complete",
-        "To be deployed",
-        "Duplicate - Closed",
-        "Ongoing"
+        "Not started", "Awaiting Info", "At Beta", "In progress",
+        "In testing", "Complete", "To be deployed", "Duplicate - Closed", "Ongoing"
     ]
 
     # Extract unique phases dynamically, preserving defaults if missing

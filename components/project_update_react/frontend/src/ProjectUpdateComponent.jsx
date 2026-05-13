@@ -56,12 +56,18 @@ function ProjectUpdateComponent(props) {
   const updatedFlagKeys = [
     "project_name_updated", "lead_engineer_updated", "priority_updated",
     "status_updated", "trello_link_updated", "start_date_updated",
-    "end_date_updated", "phase_updated", "prototype_link_updated", "slack_link_updated"
+    "end_date_updated", "phase_updated", "prototype_link_updated", "slack_link_updated",
+    "estimated_days_updated", "checkbox_bc_updated", "checkbox_trello_updated",
+    "checkbox_wa_updated", "checkbox_ws_updated"
   ];
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
-      if (filterName && !(p.project_name || "").toLowerCase().includes(filterName.toLowerCase())) return false;
+      if (filterName) {
+        const nameMatch = (p.project_name || "").toLowerCase().includes(filterName.toLowerCase());
+        const codeMatch = (p.project_code || "").toLowerCase().includes(filterName.toLowerCase());
+        if (!nameMatch && !codeMatch) return false;
+      }
       const code = parseInt(p.project_code, 10);
       if (filterCodeMin && code < parseInt(filterCodeMin, 10)) return false;
       if (filterCodeMax && code > parseInt(filterCodeMax, 10)) return false;
@@ -152,7 +158,11 @@ function ProjectUpdateComponent(props) {
       const server = serverProjects.find((sp) => sp.project_code === p.project_code);
       if (!server) return;
       const changes = {};
-      const editableFields = ["project_name", "lead_engineer", "priority", "start_date", "end_date", "status", "phase", "trello_link", "prototype_link", "slack_link"];
+      const editableFields = [
+        "project_name", "lead_engineer", "priority", "start_date", "end_date",
+        "status", "phase", "trello_link", "prototype_link", "slack_link",
+        "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days"
+      ];
       editableFields.forEach((f) => {
         if (String(server[f] ?? "") !== String(p[f] ?? "")) {
           changes[f] = p[f];
@@ -226,7 +236,7 @@ function ProjectUpdateComponent(props) {
           <h1 className="pu-title">Project Attributes</h1>
           <div className="pu-header-actions">
             <span className="pu-count-label">
-              Showing {filteredProjects.length} of {projects.length} projects
+              Showing {filteredProjects.length} incomplete project status records of {projects.length} projects.
             </span>
             {!readOnly && editedCount > 0 && (
               <button className="pu-save-btn" onClick={handleSave}>
@@ -355,23 +365,26 @@ function ProjectUpdateComponent(props) {
             <table className="pu-table">
               <thead>
                 <tr>
-                  <th className="th-hash" rowSpan="3">#</th>
-                  <th className="th-code" rowSpan="3">CODE</th>
-                  <th className="th-project">PROJECT NAME</th>
-                  <th className="th-lead">LEAD ENGINEER</th>
-                  <th className="th-status">STATUS</th>
-                  <th className="th-phase">PHASE</th>
-                </tr>
-                <tr>
-                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> TRELLO URL</th>
-                  <th className="th-sub">START DATE</th>
-                  <th className="th-sub">END DATE</th>
-                  <th className="th-sub"><span className="th-sub-icon-circle">⊙</span> PRIORITY</th>
-                </tr>
-                <tr>
-                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> PROTOTYPE URL</th>
-                  <th className="th-sub"><Link size={12} className="th-sub-icon" /> SLACK URL</th>
-                  <th className="th-sub" colSpan="2"></th>
+                  <th className="th-hash">#</th>
+                  <th className="th-code">CODE</th>
+                  <th className="th-project">
+                    PROJECT NAME / TRELLO URL /<br />
+                    PROTOTYPE URL / SLACK URL
+                  </th>
+                  <th className="th-lead">
+                    LEAD ENGINEER /<br />
+                    START DATE / END DATE
+                  </th>
+                  <th className="th-status">
+                    STATUS / PHASE /<br />
+                    PRIORITY
+                  </th>
+                  <th className="th-process">
+                    <span className="process-header">PROJECT PROCESS</span>
+                  </th>
+                  <th className="th-estimate">
+                    <span className="process-header">ESTIMATE DAYS</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -380,166 +393,153 @@ function ProjectUpdateComponent(props) {
                     <React.Fragment key={project.project_code}>
                       {/* Primary row */}
                       <tr className="pu-row-primary">
-                        <td className="td-hash" rowSpan="3">{index + 1}</td>
-                        <td className="td-code" rowSpan="3">
+                        <td className="td-hash">{index + 1}</td>
+                        <td className="td-code">
                           <b>{project.project_code || ""}</b>
                         </td>
 
-                        {/* Project Name */}
+                        {/* Project Name Column Group */}
                         <td className="td-project-name">
-                          <textarea
-                            rows={2}
+                          <input type="text"
                             value={project.project_name || ""}
                             onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
                             className={cellInputClass(project.project_code, "project_name", project.project_name, "name-field")}
                             disabled={readOnly}
                             title={project.project_name || "Project Name is required"}
-                            style={{ resize: "none", overflow: "hidden", fontFamily: "inherit", minHeight: "3rem", lineHeight: "1.25" }}
                           />
+                          <div className="pu-url-row">
+                            <input type="text" value={project.trello_link || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field-small")}
+                              disabled={readOnly}
+                              placeholder="Trello URL" />
+                            <input type="text" value={project.prototype_link || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
+                              disabled={readOnly}
+                              placeholder="Prototype URL" />
+                            <input type="text" value={project.slack_link || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
+                              className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
+                              disabled={readOnly}
+                              placeholder="Slack URL" />
+                          </div>
                         </td>
 
-                        {/* Lead Engineer */}
+                        {/* Lead Engineer Column Group */}
                         <td className="td-lead">
                           <select value={project.lead_engineer || ""}
                             onChange={(e) => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
-                            className={cellSelectClass(project.project_code, "lead_engineer", project.lead_engineer)}
-                            disabled={readOnly}
-                            title={!project.lead_engineer ? "Lead Engineer is not yet assigned" : ""}>
+                            className={cellSelectClass(project.project_code, "lead_engineer", project.lead_engineer, "lead-select-main")}
+                            disabled={readOnly}>
                             <option value="">Unassigned</option>
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
+                          <div className="pu-date-row">
+                            <div className="pu-date-input-wrap">
+                              <input type="date" value={project.start_date || ""}
+                                onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
+                                className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
+                                disabled={readOnly} />
+                            </div>
+                            <div className="pu-date-input-wrap">
+                              <input type="date" value={project.end_date || ""}
+                                onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
+                                className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
+                                disabled={readOnly} />
+                            </div>
+                          </div>
                         </td>
 
-                        {/* Status */}
-                        <td className="td-status">
+                        {/* Status Column Group */}
+                        <td className="td-status-group">
                           <select value={project.status || "In progress"}
                             onChange={(e) => handleUpdate(project.project_code, "status", e.target.value)}
-                            className={cellSelectClass(project.project_code, "status", project.status || "In progress")}
+                            className={cellSelectClass(project.project_code, "status", project.status || "In progress", "status-select-main")}
                             disabled={readOnly}>
                             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                           </select>
-                        </td>
-
-                        {/* Phase */}
-                        <td className="td-phase">
-                          <select value={project.phase || "Analysis"}
-                            onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
-                            className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis")}
-                            disabled={readOnly}>
-                            {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
-                          </select>
-                        </td>
-                      </tr>
-
-                      {/* Secondary row */}
-                      <tr className="pu-row-secondary">
-                        {/* Trello URL */}
-                        <td className="td-trello">
-                          <div className="pu-url-input-wrapper">
-                            <input type="text" value={project.trello_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field")}
-                              disabled={readOnly}
-                              placeholder="Trello URL"
-                              title={!project.trello_link ? "Trello URL is not yet filled" : ""} />
-                            {project.trello_link && (
-                              <a href={project.trello_link.startsWith('http') ? project.trello_link : `https://${project.trello_link}`}
-                                target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
-                                <ExternalLink size={14} />
-                              </a>
-                            )}
+                          <div className="pu-phase-row">
+                            <select value={project.phase || "Analysis"}
+                              onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
+                              className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis", "phase-select-small")}
+                              disabled={readOnly}>
+                              {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
+                            </select>
+                            <input type="text" value={project.priority || ""}
+                              onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
+                              className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
+                              disabled={readOnly} />
                           </div>
                         </td>
 
-                        {/* Start Date */}
-                        <td className="td-date">
-                          <input type="date" value={project.start_date || ""}
-                            onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                            className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field")}
-                            disabled={readOnly}
-                            placeholder="dd - mm - yyyy"
-                            title={!project.start_date ? "Start Date is not yet filled" : ""} />
-                        </td>
-
-                        {/* End Date */}
-                        <td className="td-date">
-                          <input type="date" value={project.end_date || ""}
-                            onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                            className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field")}
-                            disabled={readOnly}
-                            placeholder="dd - mm - yyyy"
-                            title={!project.end_date ? "End Date is not yet filled" : ""} />
-                        </td>
-
-                        {/* Priority */}
-                        <td className="td-priority">
-                          <input type="text" value={project.priority || ""}
-                            onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
-                            maxLength={4}
-                            className={cellInputClass(project.project_code, "priority", project.priority, "priority-field")}
-                            disabled={readOnly}
-                            title={!project.priority ? "Priority is not yet filled" : "Priority (e.g. 10)"} />
-                        </td>
-                      </tr>
-
-                      {/* Tertiary row */}
-                      <tr className="pu-row-tertiary">
-                        {/* Prototype URL */}
-                        <td className="td-prototype">
-                          <div className="pu-url-input-wrapper">
-                            <input type="text" value={project.prototype_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field")}
-                              disabled={readOnly}
-                              placeholder="Prototype URL"
-                              title={!project.prototype_link ? "Prototype URL is not yet filled" : ""} />
-                            {project.prototype_link && (
-                              <a href={project.prototype_link.startsWith('http') ? project.prototype_link : `https://${project.prototype_link}`}
-                                target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Link">
-                                <ExternalLink size={14} />
-                              </a>
-                            )}
+                        {/* Project Process (Checkboxes) */}
+                        <td className="td-process">
+                          <div className="pu-checkbox-grid">
+                            {[
+                              { label: "BRD", field: "checkbox_bc" },
+                              { label: "Trello", field: "checkbox_trello" },
+                              { label: "WA", field: "checkbox_wa" },
+                              { label: "WS", field: "checkbox_ws" }
+                            ].map((item) => (
+                              <label key={item.field} className="pu-checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  checked={(() => {
+                                    const val = project[item.field];
+                                    // null/undefined/empty means CHECKED
+                                    if (val === null || val === undefined || val === "") return true;
+                                    // 1 (or "1") means UNCHECKED
+                                    if (val === 1 || val === "1" || val === 1.0 || val === "1.0") return false;
+                                    return false; // default to unchecked for other values
+                                  })()}
+                                  onChange={(e) => {
+                                    // If user wants it checked -> set to null
+                                    // If user wants it unchecked -> set to 1
+                                    const newVal = e.target.checked ? null : 1;
+                                    console.log(`Inverted Check ${item.field} for ${project.project_code}:`, newVal);
+                                    handleUpdate(project.project_code, item.field, newVal);
+                                  }}
+                                  disabled={readOnly}
+                                />
+                                <span>{item.label}</span>
+                              </label>
+                            ))}
                           </div>
                         </td>
 
-                        {/* Slack URL */}
-                        <td className="td-slack">
-                          <div className="pu-url-input-wrapper">
+                        {/* Estimate Days */}
+                        <td className="td-estimate">
+                          <div className="pu-estimate-wrap">
+                            <span className="pu-estimate-label">DAYS</span>
                             <input
-                              type="text"
-                              value={project.slack_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field")}
+                              type="number"
+                              value={(() => {
+                                const val = project.estimated_days;
+                                if (val === null || val === undefined || val === "") return "";
+                                const num = parseFloat(val);
+                                if (isNaN(num)) return val;
+                                return num % 1 === 0 ? num.toString() : num.toString();
+                              })()}
+                              onChange={(e) => handleUpdate(project.project_code, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
+                              className={cellInputClass(project.project_code, "estimated_days", project.estimated_days, "estimate-input")}
                               disabled={readOnly}
-                              placeholder="Slack URL"
-                              title={!project.slack_link ? "Slack URL is not yet filled" : ""}
                             />
-                            {project.slack_link && (
-                              <a
-                                href={project.slack_link.startsWith('http') ? project.slack_link : `https://${project.slack_link}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="pu-input-url-btn"
-                                title="Open Slack Link"
-                              >
-                                <ExternalLink size={14} />
-                              </a>
-                            )}
                           </div>
                         </td>
-
-                        <td colSpan="2"></td>
                       </tr>
+
+
 
                       {/* Spacer row for record separation */}
                       <tr className="pu-spacer-row">
-                        <td colSpan="6"></td>
+                        <td colSpan="7"></td>
                       </tr>
                     </React.Fragment>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="6">
+                    <td colSpan="7">
                       <div className="pu-empty-state">
                         <Search size={24} />
                         <p>No projects match your current filters.</p>

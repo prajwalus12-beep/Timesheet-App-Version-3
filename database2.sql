@@ -73,3 +73,47 @@ CREATE INDEX idx_project_reports_code      ON project_reports(project_code);
 ALTER TABLE project_reports
 ADD COLUMN slack_link TEXT,
 ADD COLUMN slack_link_updated BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ==========================================
+-- ADD NEW CHECKBOX COLUMNS + ESTIMATED DAYS
+-- ==========================================
+
+ALTER TABLE project_reports
+ADD COLUMN checkbox_bc SMALLINT,
+ADD COLUMN checkbox_bc_updated BOOLEAN NOT NULL DEFAULT FALSE,
+
+ADD COLUMN checkbox_trello SMALLINT,
+ADD COLUMN checkbox_trello_updated BOOLEAN NOT NULL DEFAULT FALSE,
+
+ADD COLUMN checkbox_wa SMALLINT,
+ADD COLUMN checkbox_wa_updated BOOLEAN NOT NULL DEFAULT FALSE,
+
+ADD COLUMN checkbox_ws SMALLINT,
+ADD COLUMN checkbox_ws_updated BOOLEAN NOT NULL DEFAULT FALSE,
+
+ADD COLUMN estimated_days INTEGER,
+ADD COLUMN estimated_days_updated BOOLEAN NOT NULL DEFAULT FALSE;
+
+
+-- ==========================================
+-- OPTIONAL CHECK CONSTRAINTS
+-- only allow NULL or 1
+-- 1 = Unchecked
+-- NULL = Checked / No Value
+-- ==========================================
+
+ALTER TABLE project_reports
+ADD CONSTRAINT chk_checkbox_bc
+CHECK (checkbox_bc IS NULL OR checkbox_bc = 1);
+
+ALTER TABLE project_reports
+ADD CONSTRAINT chk_checkbox_trello
+CHECK (checkbox_trello IS NULL OR checkbox_trello = 1);
+
+ALTER TABLE project_reports
+ADD CONSTRAINT chk_checkbox_wa
+CHECK (checkbox_wa IS NULL OR checkbox_wa = 1);
+
+ALTER TABLE project_reports
+ADD CONSTRAINT chk_checkbox_ws
+CHECK (checkbox_ws IS NULL OR checkbox_ws = 1);

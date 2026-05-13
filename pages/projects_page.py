@@ -38,7 +38,11 @@ def render_projects_page():
             emps = ["All"] + sorted([str(e) for e in projs['lead_engineer'].dropna().unique() if str(e).strip()])
             emp_filter = st.selectbox("Lead Engineer", emps, key="proj_lead")
         with col_stat:
-            statuses = ["All"] + sorted([str(s) for s in projs['status'].dropna().unique() if str(s).strip()])
+            status_list = [
+                "Not started", "Awaiting Info", "At Beta", "In progress",
+                "In testing", "Complete", "To be deployed", "Duplicate - Closed", "Ongoing"
+            ]
+            statuses = ["All"] + status_list
             stat_filter = st.selectbox("Status", statuses, key="proj_stat")
             
         def clear_filters():
