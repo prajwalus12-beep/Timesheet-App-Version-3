@@ -261,7 +261,10 @@ def render_timesheet_page(user):
         # Header Row HTML
         st.markdown(f"""
             <div class="ts-hdr-row">
-                <div class="ts-c-date ts-hdr-lbl">DATE</div>
+                <div class="ts-c-date ts-hdr-lbl">
+                    DATE<br>
+                    <div class="ts-hdr-sub">PROJECT CODE</div>
+                </div>
                 <div class="ts-c-proj ts-hdr-lbl">
                     PROJECT NAME<br>
                     <div class="ts-hdr-sub">
@@ -297,7 +300,10 @@ def render_timesheet_page(user):
             r_col_date, r_col_proj, r_col_emp, r_col_phase, r_col_action = st.columns([1.2, 3.5, 2.0, 1.5, 1.2])
             
             with r_col_date:
-                st.markdown(f'<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;"><div class="ts-entry-box" style="margin-bottom:0;"><b>{r_date_val.strftime("%Y-%m-%d")}</b></div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
+                st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px;"><b>{r_date_val.strftime("%Y-%m-%d")}</b></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #64748b; background-color: #f8fafc;">{row["project_code"]}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
             
             with r_col_proj:
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)

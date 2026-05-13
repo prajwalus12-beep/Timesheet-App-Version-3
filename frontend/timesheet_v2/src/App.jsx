@@ -88,7 +88,10 @@ const TimesheetTable = ({ data, startOfWeek, endOfWeek, isReadOnly }) => {
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/30">
-              <th className="pl-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-widest w-32">Date</th>
+              <th className="pl-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-widest w-32">
+                Date
+                <div className="text-[9px] font-medium text-slate-400 mt-0.5">Project Code</div>
+              </th>
               <th className="px-4 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-widest">Activity & Project</th>
               <th className="px-4 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-widest w-48">Resource</th>
               <th className="px-4 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-widest w-40 text-center">Status</th>
@@ -110,6 +113,9 @@ const TimesheetTable = ({ data, startOfWeek, endOfWeek, isReadOnly }) => {
                       </span>
                       <span className="text-[11px] text-slate-400 font-medium">
                         {rowDate.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-bold mt-1 bg-slate-100 px-1 rounded w-fit">
+                        {row.project_code}
                       </span>
                     </div>
                   </td>
