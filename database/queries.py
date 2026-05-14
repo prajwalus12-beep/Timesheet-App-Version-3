@@ -456,144 +456,139 @@ def _parse_int_value(val):
         return None
 
 def import_project_updates(df):
-    """Import project updates into project_reports using Supabase SDK."""
+    """Import project updates into project_reports using Supabase SDK.
+    
+    If a field has its '*_updated' flag set to True (meaning it was manually edited in the UI),
+    this function will only overwrite it if the imported value matches the current DB value.
+    Otherwise, it preserves the manual edit and keeps the highlight.
+    """
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
+    def _normalize_for_cmp(v):
+        if v is None: return None
+        try:
+            # If it's a number, convert 9.0 -> 9
+            f_v = float(v)
+            if f_v == int(f_v): return str(int(f_v))
+            return str(f_v)
+        except (ValueError, TypeError):
+            s = str(v).strip()
+            if s.lower() in ('nan', 'none', 'nat', ''):
+                return None
+            return s
+
     try:
         # Fetch existing records for comparison
         existing_res = supabase.table('project_reports').select('*').execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
-        inserts = []
-        updates = []
-        resets = []   # records that match import — clear all *_updated flags
-        
-        # Mapping of Excel columns to DB fields
-        col_map = {
-            'Job No': 'project_code',
-            'Job Priority': 'priority',
-            'Project': 'project_name',
-            'Status': 'status',
-            'Lead engineer': 'lead_engineer',
-            'Trello': 'trello_link',
-            'Start Date': 'start_date',
-            'End Date': 'end_date',
-            'Phase': 'phase',
-            'Prototype': 'prototype_link',
-            'Slack': 'slack_link',
-            'Estimated Days': 'estimated_days',
-            'CheckBoxe BC': 'checkbox_bc',
-            'CheckBoxe Trello': 'checkbox_trello',
-            'CheckBoxe WA': 'checkbox_wa',
-            'CheckBoxe WS': 'checkbox_ws'
-        }
+        to_insert = []
+        to_update = []
+        new_count = 0
+        updated_count = 0
+        preserved_count = 0
+        cleared_count = 0
+
+        # Data fields to process
+        data_fields = [
+            ('project_name', 'Project', str, ""),
+            ('priority', 'Job Priority', _parse_int_value, None),
+            ('status', 'Status', str, 'In progress'),
+            ('lead_engineer', 'Lead engineer', str, ""),
+            ('trello_link', 'Trello', str, None),
+            ('start_date', 'Start Date', _parse_date_value, None),
+            ('end_date', 'End Date', _parse_date_value, None),
+            ('phase', 'Phase', str, 'Analysis'),
+            ('prototype_link', 'Prototype', str, None),
+            ('slack_link', 'Slack', str, None),
+            ('estimated_days', 'Estimated Days', _parse_int_value, None),
+            ('checkbox_bc', 'CheckBoxe BC', _parse_checkbox_value, None),
+            ('checkbox_trello', 'CheckBoxe Trello', _parse_checkbox_value, None),
+            ('checkbox_wa', 'CheckBoxe WA', _parse_checkbox_value, None),
+            ('checkbox_ws', 'CheckBoxe WS', _parse_checkbox_value, None),
+        ]
 
         for _, row in df.iterrows():
             code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
             if not code or code.lower() == 'nan':
                 continue
 
-            # Build record
-            record = {
-                "project_code": code,
-                "project_name": str(row.get('Project', '')) if pd.notna(row.get('Project')) else "",
-                "priority": _parse_int_value(row.get('Job Priority')),
-                "status": str(row.get('Status', 'In progress')) if pd.notna(row.get('Status')) else 'In progress',
-                "lead_engineer": str(row.get('Lead engineer', '')) if pd.notna(row.get('Lead engineer')) else "",
-                "trello_link": str(row.get('Trello', '')) if pd.notna(row.get('Trello')) else None,
-                "start_date": _parse_date_value(row.get('Start Date')),
-                "end_date": _parse_date_value(row.get('End Date')),
-                "phase": str(row.get('Phase', 'Analysis')) if pd.notna(row.get('Phase')) else 'Analysis',
-                "prototype_link": str(row.get('Prototype', '')) if pd.notna(row.get('Prototype')) else None,
-                "slack_link": str(row.get('Slack', '')) if pd.notna(row.get('Slack')) else None,
-                "estimated_days": _parse_int_value(row.get('Estimated Days')),
-                "checkbox_bc": _parse_checkbox_value(row.get('CheckBoxe BC')),
-                "checkbox_trello": _parse_checkbox_value(row.get('CheckBoxe Trello')),
-                "checkbox_wa": _parse_checkbox_value(row.get('CheckBoxe WA')),
-                "checkbox_ws": _parse_checkbox_value(row.get('CheckBoxe WS')),
-                # Default ALL flags to False to clear highlights on import
-                "project_code_updated": False,
-                "project_name_updated": False,
-                "lead_engineer_updated": False,
-                "priority_updated": False,
-                "status_updated": False,
-                "trello_link_updated": False,
-                "slack_link_updated": False,
-                "start_date_updated": False,
-                "end_date_updated": False,
-                "phase_updated": False,
-                "prototype_link_updated": False,
-                "estimated_days_updated": False,
-                "checkbox_bc_updated": False,
-                "checkbox_trello_updated": False,
-                "checkbox_wa_updated": False,
-                "checkbox_ws_updated": False
-            }
-            clean_record = _sanitize_dict(record)
+            record = {"project_code": code}
             
             if code in existing_map:
                 existing = existing_map[code]
-                # Check if any data field changed (excluding flags)
-                data_fields = [
-                    'project_name', 'priority', 'status', 'lead_engineer', 'trello_link',
-                    'start_date', 'end_date', 'phase', 'prototype_link', 'slack_link',
-                    'estimated_days', 'checkbox_bc', 'checkbox_trello', 'checkbox_wa', 'checkbox_ws'
-                ]
-                changed = False
-                for f in data_fields:
-                    val_import = clean_record.get(f)
-                    val_db = existing.get(f)
-                    
-                    # Normalize for comparison
-                    def _normalize_for_cmp(v):
-                        if v is None: return None
-                        try:
-                            # If it's a number, convert 9.0 -> 9
-                            f_v = float(v)
-                            if f_v == int(f_v): return str(int(f_v))
-                            return str(f_v)
-                        except (ValueError, TypeError):
-                            return str(v).strip()
-
-                    if _normalize_for_cmp(val_import) != _normalize_for_cmp(val_db):
-                        changed = True
-                        break
+                row_changed = False
+                row_preserved = False
                 
-                if changed:
-                    updates.append(clean_record)
-                else:
-                    resets.append(code)
+                for db_f, excel_f, parser, default in data_fields:
+                    raw_val = row.get(excel_f)
+                    # Use parser for all fields
+                    if parser == str:
+                        imp_val = str(raw_val) if pd.notna(raw_val) else default
+                    else:
+                        imp_val = parser(raw_val)
+                    
+                    flag_col = f"{db_f}_updated"
+                    is_updated = existing.get(flag_col, False)
+                    db_val = existing.get(db_f)
+                    
+                    if is_updated:
+                        # Manually updated in DB. Compare import with DB.
+                        if _normalize_for_cmp(imp_val) == _normalize_for_cmp(db_val):
+                            # Master file now matches manual edit. Clear highlight.
+                            record[db_f] = imp_val
+                            record[flag_col] = False
+                            cleared_count += 1
+                            row_changed = True
+                        else:
+                            # Still different. Preserve manual edit and keep highlight.
+                            record[db_f] = db_val
+                            record[flag_col] = True
+                            row_preserved = True
+                    else:
+                        # Not manually updated. Overwrite if different.
+                        if _normalize_for_cmp(imp_val) != _normalize_for_cmp(db_val):
+                            record[db_f] = imp_val
+                            record[flag_col] = False
+                            row_changed = True
+                        else:
+                            # Same value, just ensure flag is False
+                            record[db_f] = db_val
+                            record[flag_col] = False
+                
+                if row_changed or row_preserved:
+                    # Also reset project_code_updated if it exists
+                    record["project_code_updated"] = False
+                    to_update.append(_sanitize_dict(record))
+                    if row_changed: updated_count += 1
+                    if row_preserved: preserved_count += 1
             else:
-                inserts.append(clean_record)
+                # New record
+                for db_f, excel_f, parser, default in data_fields:
+                    raw_val = row.get(excel_f)
+                    if parser == str:
+                        record[db_f] = str(raw_val) if pd.notna(raw_val) else default
+                    else:
+                        record[db_f] = parser(raw_val)
+                    record[f"{db_f}_updated"] = False
+                
+                record["project_code_updated"] = False
+                to_insert.append(_sanitize_dict(record))
+                new_count += 1
 
-        if inserts:
-            supabase.table('project_reports').insert(inserts).execute()
-        if updates:
-            for u in updates:
+        if to_insert:
+            supabase.table('project_reports').insert(to_insert).execute()
+        if to_update:
+            for u in to_update:
                 supabase.table('project_reports').update(u).eq('project_code', u['project_code']).execute()
-        if resets:
-            reset_payload = {
-                "project_code_updated": False,
-                "project_name_updated": False,
-                "lead_engineer_updated": False,
-                "priority_updated": False,
-                "status_updated": False,
-                "trello_link_updated": False,
-                "slack_link_updated": False,
-                "start_date_updated": False,
-                "end_date_updated": False,
-                "phase_updated": False,
-                "prototype_link_updated": False,
-                "estimated_days_updated": False,
-                "checkbox_bc_updated": False,
-                "checkbox_trello_updated": False,
-                "checkbox_wa_updated": False,
-                "checkbox_ws_updated": False
-            }
-            supabase.table('project_reports').update(reset_payload).in_('project_code', resets).execute()
             
-        return True, f"Successfully imported {len(inserts)} new, updated {len(updates)} changed, and cleared highlights for {len(resets)} matched project(s)."
+        msg = f"Import complete: {new_count} new projects added."
+        if updated_count: msg += f" {updated_count} projects updated."
+        if preserved_count: msg += f" {preserved_count} manual edits preserved."
+        if cleared_count: msg += f" {cleared_count} highlights cleared."
+        
+        return True, msg
     except Exception as e:
         return False, str(e)
 
