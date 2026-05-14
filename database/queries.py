@@ -483,6 +483,58 @@ def import_project_updates(df):
         existing_res = supabase.table('project_reports').select('*').execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
+        def _parse_priority(val):
+            if pd.isna(val): return None
+            try:
+                # Handle numeric priority (e.g. 1.0 -> "1")
+                f_val = float(val)
+                if f_val == int(f_val): return str(int(f_val))
+                return str(f_val)
+            except (ValueError, TypeError):
+                # Handle text priority (e.g. "High")
+                s = str(val).strip()
+                return s if s.lower() not in ('nan', 'none', 'nat', '') else None
+
+        # Map DB fields to potential Excel column aliases for robust matching
+        field_aliases = {
+            'project_name': ['Project', 'Project Name', 'Project_Name'],
+            'priority': ['Job Priority', 'Priority', 'Job_Priority'],
+            'status': ['Status', 'Project Status'],
+            'lead_engineer': ['Lead engineer', 'Lead Engineer', 'Lead'],
+            'trello_link': ['Trello', 'Trello Link', 'Trello_Link'],
+            'start_date': ['Start Date', 'Date Start', 'Date_Start', 'Start'],
+            'end_date': ['End Date', 'Date End', 'Finish Date', 'Date Finish', 'Finish', 'Date_Finish', 'Date Finish'],
+            'phase': ['Phase', 'Project Phase'],
+            'prototype_link': ['Prototype', 'Prototype Link', 'Prototype_Link'],
+            'slack_link': ['Slack', 'Slack Link', 'Slack URL', 'Slack_Link'],
+            'estimated_days': ['Estimated Days', 'Estimate Days', 'Days'],
+            'checkbox_bc': ['CheckBoxe BC', 'CheckBoxe_BC', 'BRD'],
+            'checkbox_trello': ['CheckBoxe Trello', 'CheckBoxe_Trello', 'Trello Check'],
+            'checkbox_wa': ['CheckBoxe WA', 'CheckBoxe_WA', 'WA'],
+            'checkbox_ws': ['CheckBoxe WS', 'CheckBoxe_WS', 'WS']
+        }
+
+        # Pre-resolve which column name to use for each DB field based on the uploaded DataFrame columns
+        # We search case-sensitively first, then case-insensitively if needed.
+        col_mapping = {}
+        df_cols_lower = {str(c).strip().lower(): str(c).strip() for c in df.columns}
+        
+        for db_f, aliases in field_aliases.items():
+            found = False
+            for a in aliases:
+                # Direct match
+                if a in df.columns:
+                    col_mapping[db_f] = a
+                    found = True
+                    break
+                # Case-insensitive match
+                if a.lower() in df_cols_lower:
+                    col_mapping[db_f] = df_cols_lower[a.lower()]
+                    found = True
+                    break
+            if not found:
+                col_mapping[db_f] = None
+
         to_insert = []
         to_update = []
         new_count = 0
@@ -490,27 +542,28 @@ def import_project_updates(df):
         preserved_count = 0
         cleared_count = 0
 
-        # Data fields to process
+        # Data fields to process: (DB Field, Parser, Default)
+        # Note: excel_f is now looked up via col_mapping
         data_fields = [
-            ('project_name', 'Project', str, ""),
-            ('priority', 'Job Priority', _parse_int_value, None),
-            ('status', 'Status', str, 'In progress'),
-            ('lead_engineer', 'Lead engineer', str, ""),
-            ('trello_link', 'Trello', str, None),
-            ('start_date', 'Start Date', _parse_date_value, None),
-            ('end_date', 'End Date', _parse_date_value, None),
-            ('phase', 'Phase', str, 'Analysis'),
-            ('prototype_link', 'Prototype', str, None),
-            ('slack_link', 'Slack', str, None),
-            ('estimated_days', 'Estimated Days', _parse_int_value, None),
-            ('checkbox_bc', 'CheckBoxe BC', _parse_checkbox_value, None),
-            ('checkbox_trello', 'CheckBoxe Trello', _parse_checkbox_value, None),
-            ('checkbox_wa', 'CheckBoxe WA', _parse_checkbox_value, None),
-            ('checkbox_ws', 'CheckBoxe WS', _parse_checkbox_value, None),
+            ('project_name', lambda x: str(x).strip() if pd.notna(x) else "", ""),
+            ('priority', _parse_priority, None),
+            ('status', lambda x: str(x).strip() if pd.notna(x) else 'In progress', 'In progress'),
+            ('lead_engineer', lambda x: str(x).strip() if pd.notna(x) else "", ""),
+            ('trello_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
+            ('start_date', _parse_date_value, None),
+            ('end_date', _parse_date_value, None),
+            ('phase', lambda x: str(x).strip() if pd.notna(x) else 'Analysis', 'Analysis'),
+            ('prototype_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
+            ('slack_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
+            ('estimated_days', _parse_int_value, None),
+            ('checkbox_bc', _parse_checkbox_value, None),
+            ('checkbox_trello', _parse_checkbox_value, None),
+            ('checkbox_wa', _parse_checkbox_value, None),
+            ('checkbox_ws', _parse_checkbox_value, None),
         ]
 
         for _, row in df.iterrows():
-            code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
+            code = _normalize_code(row.get('Job No') or row.get('Project Code') or row.get('Job_No') or row.get('Project_Code') or '')
             if not code or code.lower() == 'nan':
                 continue
 
@@ -521,56 +574,52 @@ def import_project_updates(df):
                 row_changed = False
                 row_preserved = False
                 
-                for db_f, excel_f, parser, default in data_fields:
-                    raw_val = row.get(excel_f)
-                    # Use parser for all fields
-                    if parser == str:
-                        imp_val = str(raw_val) if pd.notna(raw_val) else default
-                    else:
-                        imp_val = parser(raw_val)
+                for db_f, parser, default in data_fields:
+                    excel_f = col_mapping.get(db_f)
+                    raw_val = row.get(excel_f) if excel_f else None
+                    imp_val = parser(raw_val) if raw_val is not None else default
                     
                     flag_col = f"{db_f}_updated"
                     is_updated = existing.get(flag_col, False)
                     db_val = existing.get(db_f)
                     
                     if is_updated:
-                        # Manually updated in DB. Compare import with DB.
+                        # Case: Field was manually edited (*_updated = TRUE)
                         if _normalize_for_cmp(imp_val) == _normalize_for_cmp(db_val):
-                            # Master file now matches manual edit. Clear highlight.
+                            # Sub-case: Imported data matches current edited value
                             record[db_f] = imp_val
                             record[flag_col] = False
                             cleared_count += 1
                             row_changed = True
                         else:
-                            # Still different. Preserve manual edit and keep highlight.
+                            # Sub-case: Imported sheet data does not match manually edited field
                             record[db_f] = db_val
                             record[flag_col] = True
                             row_preserved = True
                     else:
-                        # Not manually updated. Overwrite if different.
+                        # Case: Field was NOT manually edited (*_updated = FALSE)
                         if _normalize_for_cmp(imp_val) != _normalize_for_cmp(db_val):
+                            # Sub-case: Imported sheet data is different
                             record[db_f] = imp_val
                             record[flag_col] = False
                             row_changed = True
                         else:
-                            # Same value, just ensure flag is False
+                            # Sub-case: Values match, ensure flag stays FALSE
                             record[db_f] = db_val
                             record[flag_col] = False
                 
                 if row_changed or row_preserved:
-                    # Also reset project_code_updated if it exists
-                    record["project_code_updated"] = False
+                    if "project_code_updated" in existing:
+                        record["project_code_updated"] = False
                     to_update.append(_sanitize_dict(record))
                     if row_changed: updated_count += 1
                     if row_preserved: preserved_count += 1
             else:
-                # New record
-                for db_f, excel_f, parser, default in data_fields:
-                    raw_val = row.get(excel_f)
-                    if parser == str:
-                        record[db_f] = str(raw_val) if pd.notna(raw_val) else default
-                    else:
-                        record[db_f] = parser(raw_val)
+                # New record: Set all flags to FALSE
+                for db_f, parser, default in data_fields:
+                    excel_f = col_mapping.get(db_f)
+                    raw_val = row.get(excel_f) if excel_f else None
+                    record[db_f] = parser(raw_val) if raw_val is not None else default
                     record[f"{db_f}_updated"] = False
                 
                 record["project_code_updated"] = False
@@ -582,7 +631,7 @@ def import_project_updates(df):
         if to_update:
             for u in to_update:
                 supabase.table('project_reports').update(u).eq('project_code', u['project_code']).execute()
-            
+             
         msg = f"Import complete: {new_count} new projects added."
         if updated_count: msg += f" {updated_count} projects updated."
         if preserved_count: msg += f" {preserved_count} manual edits preserved."
