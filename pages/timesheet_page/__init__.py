@@ -104,7 +104,72 @@ def render_timesheet_page(user):
     # Integrated Date Range Display under the filter box
     st.caption(f"Showing records from :blue[**{start_date.strftime('%d-%m-%Y')}**] to :blue[**{end_date.strftime('%d-%m-%Y')}**]")
 
+    # Initialize fixed multi-level sorting
+    if 'ts_sort_priority' not in st.session_state:
+        # Date is ALWAYS primary. Format: [('date', 'desc'), (secondary_col, order)]
+        st.session_state.ts_sort_priority = [('date', 'desc')]
+
+    def toggle_ts_sort(col):
+        if col == 'date':
+            # Toggle primary date sort order
+            c, o = st.session_state.ts_sort_priority[0]
+            new_order = "desc" if o == "asc" else "asc"
+            st.session_state.ts_sort_priority[0] = ('date', new_order)
+        else:
+            # Handle secondary sort (Project Code or Project Name)
+            if len(st.session_state.ts_sort_priority) > 1 and st.session_state.ts_sort_priority[1][0] == col:
+                # Same secondary column: toggle order
+                c, o = st.session_state.ts_sort_priority[1]
+                new_order = "desc" if o == "asc" else "asc"
+                st.session_state.ts_sort_priority[1] = (col, new_order)
+            else:
+                # New secondary column or first secondary: replace/add
+                if len(st.session_state.ts_sort_priority) > 1:
+                    st.session_state.ts_sort_priority[1] = (col, 'asc')
+                else:
+                    st.session_state.ts_sort_priority.append((col, 'asc'))
+        st.rerun()
+
+    def get_sort_info(col):
+        for i, (c, o) in enumerate(st.session_state.ts_sort_priority):
+            if c == col:
+                icon = "🔼" if o == 'asc' else "🔽"
+                # For Date, just show the icon. For secondary, show '2' if helpful, 
+                # but following user request just the icon/arrow is usually enough.
+                # Let's show (P) for Primary and (S) for Secondary or just arrows.
+                label = " (P)" if i == 0 else " (S)"
+                return f"{icon}{label}"
+        return "↕️"
+
     data = get_timesheets(start_date, end_date, selected_emp_id, selected_proj_code)
+
+    # Apply hierarchical sorting logic
+    if not data.empty:
+        sort_fields = []
+        sort_ascending = []
+        
+        # Mapping UI columns to DB/Helper fields
+        col_to_field = {
+            'date': 'sort_date_helper',
+            'project_code': 'sort_code_helper',
+            'project_name': 'project_name'
+        }
+        
+        # Prepare helper columns
+        data['sort_date_helper'] = pd.to_datetime(data['date'])
+        data['sort_code_helper'] = pd.to_numeric(data['project_code'], errors='coerce')
+        
+        for col_name, order in st.session_state.ts_sort_priority:
+            field = col_to_field.get(col_name)
+            if field and field in data.columns:
+                sort_fields.append(field)
+                sort_ascending.append(order == 'asc')
+        
+        if sort_fields:
+            # Final tie-breaker
+            sort_fields.append('id')
+            sort_ascending.append(False)
+            data = data.sort_values(by=sort_fields, ascending=sort_ascending)
 
     with btn_col1:
         st.write("")
@@ -197,18 +262,99 @@ def render_timesheet_page(user):
         css_style = """
         .ts-table-container { border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background-color: #ffffff; margin-top: 10px; }
         
-        .ts-hdr-row { background-color: #f8fafc; padding: 18px 1rem; border-bottom: none; display: flex; align-items: center; gap: 0; width: 100%; }
-        .ts-hdr-lbl { font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 15px; border-right: 1px solid #e2e8f0; }
+        /* Header Design Restoration */
+        .ts-hdr-row { 
+            background-color: #f8fafc; 
+            border-top: 1px solid #cbd5e1;
+            border-bottom: 2px solid #e2e8f0; 
+            display: flex;
+            align-items: stretch;
+            width: 100%;
+            height: 52px;
+        }
+        
+        .ts-hdr-col-wrap {
+            flex: 1;
+            border-right: 1px solid #e2e8f0;
+            padding: 8px 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+        }
+        .ts-hdr-col-wrap:last-child { border-right: none; }
+
+        .ts-hdr-main-lbl {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            line-height: 1.2;
+        }
+        .ts-hdr-sub-lbl {
+            font-size: 0.62rem;
+            font-weight: 600;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+        
+        .ts-hdr-row { 
+            background-color: #f8fafc; 
+            padding: 12px 1rem; 
+            border-bottom: 2px solid #e2e8f0; 
+            display: flex; 
+            align-items: stretch; 
+            width: 100%; 
+        }
+        .ts-hdr-lbl { 
+            font-size: 0.72rem; 
+            font-weight: 700; 
+            color: #475569; 
+            text-transform: uppercase; 
+            letter-spacing: 0.05em; 
+            padding: 0 15px; 
+            border-right: 1px solid #e2e8f0; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
         .ts-hdr-lbl:last-child { border-right: none; }
-        .ts-hdr-sub { font-size: 0.65rem; font-weight: 600; color: #64748b; display: flex; align-items: center; gap: 4px; margin-top: 4px; }
-        .ts-hdr-sub span { font-size: 15px; vertical-align: middle; color: #94a3b8; }
+        .ts-hdr-sub { 
+            font-size: 0.65rem; 
+            font-weight: 600; 
+            color: #64748b; 
+            display: flex; 
+            align-items: center; 
+            gap: 4px; 
+            margin-top: 2px; 
+        }
         
         .ts-c-date { flex: 1.2; min-width: 0; }
         .ts-c-proj { flex: 3.5; min-width: 0; }
         .ts-c-emp { flex: 2.0; min-width: 0; }
         .ts-c-phase { flex: 1.5; min-width: 0; }
-        .ts-c-action { flex: 1.2; min-width: 0; }
-        
+        .ts-c-action { flex: 1.2; min-width: 0; display: flex; align-items: center; justify-content: center; }
+
+        /* Sorting Chip Styling */
+        .stButton > button {
+            transition: all 0.2s;
+            border-radius: 6px !important;
+        }
+        [key^="sort_chip_"] button {
+            font-size: 0.65rem !important;
+            padding: 4px 10px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            text-transform: uppercase !important;
+            font-weight: 700 !important;
+        }
         .ts-entry-row { 
             padding: 1px 0;
             background-color: #cbd5e1;
@@ -258,7 +404,43 @@ def render_timesheet_page(user):
         # Start Table Container
         st.markdown('<div class="ts-table-container">', unsafe_allow_html=True)
             
-        # Header Row HTML
+        # Sorting Controls Above Table
+        st.markdown('<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 5px 15px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">'
+                    '<span style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Sort By:</span>', unsafe_allow_html=True)
+        
+        s_col1, s_col2, s_col3, s_col_rest = st.columns([1.2, 2.2, 2.2, 4.4])
+        
+        with s_col1:
+            # Date is always primary
+            d_order = next((o for c, o in st.session_state.ts_sort_priority if c == 'date'), 'desc')
+            d_icon = "▼" if d_order == 'desc' else "▲"
+            if st.button(f"DATE {d_icon}", key="sort_chip_date", use_container_width=True, help="Toggle Date Sorting"):
+                toggle_ts_sort('date')
+                
+        with s_col2:
+            # Project Code (Secondary)
+            c_active = len(st.session_state.ts_sort_priority) > 1 and st.session_state.ts_sort_priority[1][0] == 'project_code'
+            c_order = st.session_state.ts_sort_priority[1][1] if c_active else ""
+            c_icon = (" ▲" if c_order == 'asc' else " ▼") if c_active else ""
+            btn_label = f"PROJECT CODE{c_icon}"
+            if st.button(btn_label, key="sort_chip_code", use_container_width=True, help="Sort by Project Code within Date", type="primary" if c_active else "secondary"):
+                toggle_ts_sort('project_code')
+
+        with s_col3:
+            # Project Name (Secondary)
+            n_active = len(st.session_state.ts_sort_priority) > 1 and st.session_state.ts_sort_priority[1][0] == 'project_name'
+            n_order = st.session_state.ts_sort_priority[1][1] if n_active else ""
+            n_icon = (" ▲" if n_order == 'asc' else " ▼") if n_active else ""
+            btn_label = f"PROJECT NAME{n_icon}"
+            if st.button(btn_label, key="sort_chip_name", use_container_width=True, help="Sort by Project Name within Date", type="primary" if n_active else "secondary"):
+                toggle_ts_sort('project_name')
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Start Table Container
+        st.markdown('<div class="ts-table-container">', unsafe_allow_html=True)
+            
+        # Restore Original Header Row HTML
         st.markdown(f"""
             <div class="ts-hdr-row">
                 <div class="ts-c-date ts-hdr-lbl">
@@ -268,22 +450,22 @@ def render_timesheet_page(user):
                 <div class="ts-c-proj ts-hdr-lbl">
                     PROJECT NAME<br>
                     <div class="ts-hdr-sub">
-                        <span class="material-symbols-outlined">message</span> COMMENT
+                        <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">message</span> COMMENT
                     </div>
                 </div>
                 <div class="ts-c-emp ts-hdr-lbl">
                     EMPLOYEE<br>
                     <div class="ts-hdr-sub">
-                        <span class="material-symbols-outlined">insights</span> STATUS
+                        <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">insights</span> STATUS
                     </div>
                 </div>
                 <div class="ts-c-phase ts-hdr-lbl">
                     PHASE<br>
                     <div class="ts-hdr-sub">
-                        <span class="material-symbols-outlined">schedule</span> HOURS
+                        <span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">schedule</span> HOURS
                     </div>
                 </div>
-                <div class="ts-c-action ts-hdr-lbl">ACTIONS</div>
+                <div class="ts-c-action ts-hdr-lbl" style="text-align:center; border-right:none;">ACTIONS</div>
             </div>
         """, unsafe_allow_html=True)
 

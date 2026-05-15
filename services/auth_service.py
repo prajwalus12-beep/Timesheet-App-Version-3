@@ -86,8 +86,8 @@ def login_user(username, password):
     from database.queries import get_user_by_username, update_user_lockout
     user_record = get_user_by_username(username)
     if user_record:
-        # Tuple: (id, employee_id, username, password, failed_attempts, locked_until, access)
-        uid, emp_id, uname, db_pw, failed, locked_until, access = user_record
+        # Tuple: (id, employee_id, username, password, failed_attempts, locked_until, access, emp_name)
+        uid, emp_id, uname, db_pw, failed, locked_until, access, emp_name = user_record
         
         now = datetime.now(timezone.utc)
         
@@ -105,13 +105,14 @@ def login_user(username, password):
 
         if locked_until and now < locked_until:
             wait = int((locked_until - now).total_seconds() / 60) + 1
-            return {"error": f"⚠️ Account locked for security. Please try again in {wait} min."}
+            return {"error": f"Account locked for security. Please try again in {wait} min."}
         
         if verify_password(password, db_pw):
             if failed > 0: update_user_lockout(username, 0, None)
             return {
                 "id": uid, 
                 "employee_id": emp_id, 
+                "employee_name": emp_name,
                 "username": uname, 
                 "role": "admin" if uname.lower() in ["admin", "system administrator"] else "employee",
                 "project_update_access": access

@@ -12,6 +12,7 @@ function ProjectUpdateComponent(props) {
   const phaseOptions = args.phase_options || ["Analysis", "Design", "Development", "Testing", "Deployment", "Support"];
   const statusOptions = args.status_options || ["In progress", "Complete", "On hold", "Cancelled"];
   const readOnly = args.read_only || false;
+  const isCompact = args.is_compact || false; // New prop for compact/report mode
 
   // Local working copy of projects
   const [projects, setProjects] = useState(() => {
@@ -30,8 +31,8 @@ function ProjectUpdateComponent(props) {
     if (prevServerRef.current !== newKey) {
       prevServerRef.current = newKey;
       const sorted = [...serverProjects].sort((a, b) => {
-        const codeA = parseInt((a.project_code || "0").replace(/\\D/g, ""), 10) || 0;
-        const codeB = parseInt((b.project_code || "0").replace(/\\D/g, ""), 10) || 0;
+        const codeA = parseInt((a.project_code || "0").replace(/\D/g, ""), 10) || 0;
+        const codeB = parseInt((b.project_code || "0").replace(/\D/g, ""), 10) || 0;
         return codeB - codeA;
       });
       setProjects(sorted);
@@ -39,13 +40,15 @@ function ProjectUpdateComponent(props) {
   }, [serverProjects]);
 
   // Filter States
+  const isAdmin = args.user_role === "admin";
   const [filterName, setFilterName] = useState("");
   const [filterCodeMin, setFilterCodeMin] = useState("");
   const [filterCodeMax, setFilterCodeMax] = useState("");
-  const [filterLead, setFilterLead] = useState("");
-  const [filterPriority, setFilterPriority] = useState("");
-  const [filterPhase, setFilterPhase] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
+  const [filterLead, setFilterLead] = useState(isAdmin ? "" : (args.current_user || ""));
+  const [filterPriorityMin, setFilterPriorityMin] = useState(isAdmin ? "" : "1");
+  const [filterPriorityMax, setFilterPriorityMax] = useState(isAdmin ? "" : "1");
+  const [filterPhase, setFilterPhase] = useState([]);
+  const [filterStatus, setFilterStatus] = useState(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
   const [filterUpdatedOnly, setFilterUpdatedOnly] = useState(false);
   const [filterShowCompleted, setFilterShowCompleted] = useState(false);
 
@@ -72,9 +75,18 @@ function ProjectUpdateComponent(props) {
       if (filterCodeMin && code < parseInt(filterCodeMin, 10)) return false;
       if (filterCodeMax && code > parseInt(filterCodeMax, 10)) return false;
       if (filterLead && p.lead_engineer !== filterLead) return false;
-      if (filterPriority && (p.priority || "").toUpperCase() !== filterPriority.toUpperCase()) return false;
-      if (filterPhase && p.phase !== filterPhase) return false;
-      if (filterStatus && p.status !== filterStatus) return false;
+      if (filterPriorityMin || filterPriorityMax) {
+        const pVal = parseFloat(p.priority);
+        if (!isNaN(pVal)) {
+          if (filterPriorityMin && pVal < parseFloat(filterPriorityMin)) return false;
+          if (filterPriorityMax && pVal > parseFloat(filterPriorityMax)) return false;
+        } else if (filterPriorityMin || filterPriorityMax) {
+          // If it's not a number but we have range filters, it's a mismatch
+          return false;
+        }
+      }
+      if (filterPhase.length > 0 && !filterPhase.includes(p.phase)) return false;
+      if (filterStatus.length > 0 && !filterStatus.includes(p.status)) return false;
 
       const isComplete = p.status === "Complete";
       const hasUpdate = updatedFlagKeys.some(
@@ -94,11 +106,15 @@ function ProjectUpdateComponent(props) {
 
       return true;
     });
-  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriority, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
+  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
   const resetFilters = () => {
     setFilterName(""); setFilterCodeMin(""); setFilterCodeMax("");
-    setFilterLead(""); setFilterPriority(""); setFilterPhase(""); setFilterStatus("");
+    setFilterLead(isAdmin ? "" : (args.current_user || ""));
+    setFilterPriorityMin(isAdmin ? "" : "1");
+    setFilterPriorityMax(isAdmin ? "" : "1");
+    setFilterPhase([]);
+    setFilterStatus(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
     setFilterUpdatedOnly(false);
     setFilterShowCompleted(false);
   };
@@ -109,7 +125,7 @@ function ProjectUpdateComponent(props) {
   // Reset display count when filters or data change
   useEffect(() => {
     setDisplayCount(30);
-  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriority, filterPhase, filterStatus, projects]);
+  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, projects]);
 
   const handleScroll = (e) => {
     const { scrollHeight, scrollTop, clientHeight } = e.target;
@@ -173,6 +189,7 @@ function ProjectUpdateComponent(props) {
       }
     });
     if (Object.keys(edits).length > 0) {
+      setIsSaving(true);
       Streamlit.setComponentValue({ action: "save", edits: edits });
     }
   }, [projects, serverProjects]);
@@ -220,10 +237,84 @@ function ProjectUpdateComponent(props) {
     return "";
   };
 
-  // Truncate text helper
-  const truncate = (text, maxLen = 30) => {
-    if (!text) return "";
-    return text.length > maxLen ? text.substring(0, maxLen) + "…" : text;
+  // ---- MultiSelect Sub-component ----
+  const MultiSelect = ({ options, selected, onChange, placeholder }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [tempSelected, setTempSelected] = useState(selected);
+    const containerRef = useRef(null);
+
+    // Sync temp state when external selected changes (e.g. on Reset)
+    useEffect(() => {
+      setTempSelected(selected);
+    }, [selected]);
+
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (containerRef.current && !containerRef.current.contains(event.target)) {
+          setIsOpen(false);
+          setTempSelected(selected); // Reset temp state on close without apply
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [selected]);
+
+    const toggleOption = (option) => {
+      setTempSelected(prev => 
+        prev.includes(option)
+          ? prev.filter(item => item !== option)
+          : [...prev, option]
+      );
+    };
+
+    const handleApply = () => {
+      onChange(tempSelected);
+      setIsOpen(false);
+    };
+
+    const displayValue = () => {
+      if (selected.length === 0) return <span className="pu-multiselect-placeholder">{placeholder}</span>;
+      if (selected.length <= 2) return selected.join(", ");
+      return selected.slice(0, 2).join(", ") + "...";
+    };
+
+    return (
+      <div className="pu-multiselect" ref={containerRef}>
+        <button 
+          className={`pu-multiselect-trigger ${isOpen ? "active" : ""}`} 
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          <div className="pu-multiselect-value">
+            {displayValue()}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {selected.length > 1 && <span className="pu-multiselect-badge">{selected.length}</span>}
+            <ExternalLink size={14} className="pu-multiselect-arrow" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
+          </div>
+        </button>
+        {isOpen && (
+          <div className="pu-multiselect-menu">
+            <div className="pu-multiselect-list">
+              {options.map(option => (
+                <div 
+                  key={option} 
+                  className={`pu-multiselect-item ${tempSelected.includes(option) ? "selected" : ""}`}
+                  onClick={() => toggleOption(option)}
+                >
+                  <div className="pu-multiselect-checkbox">
+                    {tempSelected.includes(option) && <X size={10} className="pu-multiselect-check-icon" />}
+                  </div>
+                  <span>{option}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pu-multiselect-footer">
+              <button className="pu-multiselect-apply" onClick={handleApply}>Apply</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ---- Render ----
@@ -238,7 +329,7 @@ function ProjectUpdateComponent(props) {
             <span className="pu-count-label">
               Showing {filteredProjects.length} incomplete project status records of {projects.length} projects.
             </span>
-            {!readOnly && editedCount > 0 && (
+            {!readOnly && !isCompact && editedCount > 0 && (
               <button className="pu-save-btn" onClick={handleSave}>
                 <Save size={16} /> Save Changes ({editedCount})
               </button>
@@ -250,12 +341,27 @@ function ProjectUpdateComponent(props) {
         </div>
 
         {/* Unsaved Changes Banner */}
-        {!readOnly && editedCount > 0 && (
+        {!readOnly && !isCompact && editedCount > 0 && (
           <div className="pu-unsaved-banner">
             <span>⚠ You have {editedCount} unsaved change(s).</span>
             <button className="pu-save-btn" onClick={handleSave} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>
               <Save size={14} /> Save
             </button>
+          </div>
+        )}
+
+        {/* Quick Filters - Hide in compact mode */}
+        {!isCompact && (
+          <div className="pu-quick-filters">
+            <span className="pu-quick-label">QUICK FILTER:</span>
+            <label className={`pu-toggle ${filterUpdatedOnly ? "active" : ""}`}>
+              <input type="checkbox" checked={filterUpdatedOnly} onChange={(e) => setFilterUpdatedOnly(e.target.checked)} />
+              <span>Show only updated</span>
+            </label>
+            <label className={`pu-toggle ${filterShowCompleted ? "active" : ""}`}>
+              <input type="checkbox" checked={filterShowCompleted} onChange={(e) => setFilterShowCompleted(e.target.checked)} />
+              <span>Show completed records</span>
+            </label>
           </div>
         )}
 
@@ -285,10 +391,10 @@ function ProjectUpdateComponent(props) {
             {/* Code Range */}
             <div className="pu-filter-group">
               <label className="pu-filter-label">Project Code Range</label>
-              <div className="pu-filter-code-range">
+              <div className="pu-filter-range">
                 <input type="number" placeholder="Min" value={filterCodeMin}
                   onChange={(e) => setFilterCodeMin(e.target.value)} className="pu-filter-input" />
-                <span className="pu-code-separator">–</span>
+                <span className="pu-range-sep">–</span>
                 <input type="number" placeholder="Max" value={filterCodeMax}
                   onChange={(e) => setFilterCodeMax(e.target.value)} className="pu-filter-input" />
               </div>
@@ -303,58 +409,69 @@ function ProjectUpdateComponent(props) {
               </select>
             </div>
 
-            {/* Priority */}
+            {/* Priority Range */}
             <div className="pu-filter-group">
-              <label className="pu-filter-label">Priority</label>
-              <input type="text" placeholder="e.g. 1 ,2" value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value)}
-                className="pu-filter-input" style={{ textTransform: "uppercase" }} />
+              <label className="pu-filter-label">Priority (Min - Max)</label>
+              <div className="pu-filter-range">
+                <input type="number" placeholder="Min" value={filterPriorityMin} onChange={(e) => setFilterPriorityMin(e.target.value)} className="pu-filter-input" />
+                <span className="pu-range-sep">-</span>
+                <input type="number" placeholder="Max" value={filterPriorityMax} onChange={(e) => setFilterPriorityMax(e.target.value)} className="pu-filter-input" />
+              </div>
             </div>
 
-            {/* Phase */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Phase</label>
-              <select value={filterPhase} onChange={(e) => setFilterPhase(e.target.value)} className="pu-filter-select">
-                <option value="">All Phases</option>
-                {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
-              </select>
-            </div>
+
+            {/* Phase - Hide in compact mode */}
+            {!isCompact && (
+              <div className="pu-filter-group">
+                <label className="pu-filter-label">Phase</label>
+                <MultiSelect 
+                  options={phaseOptions}
+                  selected={filterPhase}
+                  onChange={setFilterPhase}
+                  placeholder="All Phases"
+                />
+              </div>
+            )}
 
             {/* Status + Clear */}
             <div className="pu-filter-group">
               <label className="pu-filter-label">Status</label>
               <div className="pu-status-row">
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="pu-filter-select">
-                  <option value="">All Statuses</option>
-                  {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <MultiSelect 
+                  options={statusOptions}
+                  selected={filterStatus}
+                  onChange={setFilterStatus}
+                  placeholder="All Statuses"
+                />
                 <button className="pu-clear-btn" onClick={resetFilters} title="Clear all filters">Clear</button>
               </div>
             </div>
 
-            {/* Quick Filters */}
-            <div className="pu-filter-group pu-filter-group--full">
-              <label className="pu-filter-label">Quick Filters</label>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button
-                  className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
-                  onClick={() => setFilterUpdatedOnly((v) => !v)}
-                  title="Show only rows with highlighted (updated) fields"
-                >
-                  <span className="pu-updated-dot" />
-                  Updated Records Only
-                </button>
-                <button
-                  className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
-                  onClick={() => setFilterShowCompleted((v) => !v)}
-                  style={{ borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : "" }}
-                  title="Show only completed projects"
-                >
-                  <span className="pu-updated-dot" style={{ backgroundColor: filterShowCompleted ? "#10b981" : "" }} />
-                  Completed Records
-                </button>
+            {/* Quick Filters - Hide in compact mode */}
+            {!isCompact && (
+              <div className="pu-filter-group pu-filter-group--full">
+                <label className="pu-filter-label">Quick Filters</label>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
+                    onClick={() => setFilterUpdatedOnly((v) => !v)}
+                    title="Show only rows with highlighted (updated) fields"
+                  >
+                    <span className="pu-updated-dot" />
+                    Updated Records Only
+                  </button>
+                  <button
+                    className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
+                    onClick={() => setFilterShowCompleted((v) => !v)}
+                    style={{ borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : "" }}
+                    title="Show only completed projects"
+                  >
+                    <span className="pu-updated-dot" style={{ backgroundColor: filterShowCompleted ? "#10b981" : "" }} />
+                    Completed Records
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
           </div>
         </div>
@@ -376,20 +493,24 @@ function ProjectUpdateComponent(props) {
                     START DATE / END DATE
                   </th>
                   <th className="th-status">
-                    STATUS / PHASE /<br />
-                    PRIORITY
+                    STATUS / PRIORITY { !isCompact && "/ PHASE" }
                   </th>
-                  <th className="th-process">
-                    <span className="process-header">PROJECT PROCESS</span>
-                  </th>
-                  <th className="th-estimate">
-                    <span className="process-header">ESTIMATE DAYS</span>
-                  </th>
+                  {!isCompact && (
+                    <>
+                      <th className="th-process">
+                        <span className="process-header">PROJECT PROCESS</span>
+                      </th>
+                      <th className="th-estimate">
+                        <span className="process-header">ESTIMATE DAYS</span>
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filteredProjects.length > 0 ? (
                   filteredProjects.slice(0, displayCount).map((project, index) => (
+
                     <React.Fragment key={project.project_code}>
                       {/* Primary row */}
                       <tr className="pu-row-primary">
@@ -404,25 +525,29 @@ function ProjectUpdateComponent(props) {
                             value={project.project_name || ""}
                             onChange={(e) => handleUpdate(project.project_code, "project_name", e.target.value)}
                             className={cellInputClass(project.project_code, "project_name", project.project_name, "name-field")}
-                            disabled={readOnly}
+                            disabled={readOnly || isCompact}
                             title={project.project_name || "Project Name is required"}
                           />
-                          <div className="pu-url-row">
+                          <div className="pu-url-row" style={{ gridTemplateColumns: isCompact ? "1fr" : "repeat(3, 1fr)" }}>
                             <input type="text" value={project.trello_link || ""}
                               onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
                               className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field-small")}
-                              disabled={readOnly}
+                              disabled={readOnly || isCompact}
                               placeholder="Trello URL" />
-                            <input type="text" value={project.prototype_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
-                              disabled={readOnly}
-                              placeholder="Prototype URL" />
-                            <input type="text" value={project.slack_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
-                              disabled={readOnly}
-                              placeholder="Slack URL" />
+                            {!isCompact && (
+                              <>
+                                <input type="text" value={project.prototype_link || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
+                                  className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
+                                  disabled={readOnly}
+                                  placeholder="Prototype URL" />
+                                <input type="text" value={project.slack_link || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
+                                  className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
+                                  disabled={readOnly}
+                                  placeholder="Slack URL" />
+                              </>
+                            )}
                           </div>
                         </td>
 
@@ -431,24 +556,26 @@ function ProjectUpdateComponent(props) {
                           <select value={project.lead_engineer || ""}
                             onChange={(e) => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
                             className={cellSelectClass(project.project_code, "lead_engineer", project.lead_engineer, "lead-select-main")}
-                            disabled={readOnly}>
+                            disabled={readOnly || isCompact}>
                             <option value="">Unassigned</option>
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
-                          <div className="pu-date-row">
-                            <div className="pu-date-input-wrap">
-                              <input type="date" value={project.start_date || ""}
-                                onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                                className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
-                                disabled={readOnly} />
+                          {!isCompact && (
+                            <div className="pu-date-row">
+                              <div className="pu-date-input-wrap">
+                                <input type="date" value={project.start_date || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
+                                  className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
+                                  disabled={readOnly} />
+                              </div>
+                              <div className="pu-date-input-wrap">
+                                <input type="date" value={project.end_date || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
+                                  className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
+                                  disabled={readOnly} />
+                              </div>
                             </div>
-                            <div className="pu-date-input-wrap">
-                              <input type="date" value={project.end_date || ""}
-                                onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                                className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
-                                disabled={readOnly} />
-                            </div>
-                          </div>
+                          )}
                         </td>
 
                         {/* Status Column Group */}
@@ -456,77 +583,85 @@ function ProjectUpdateComponent(props) {
                           <select value={project.status || "In progress"}
                             onChange={(e) => handleUpdate(project.project_code, "status", e.target.value)}
                             className={cellSelectClass(project.project_code, "status", project.status || "In progress", "status-select-main")}
-                            disabled={readOnly}>
+                            disabled={readOnly || isCompact}>
                             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                           </select>
-                          <div className="pu-phase-row">
-                            <select value={project.phase || "Analysis"}
-                              onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
-                              className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis", "phase-select-small")}
-                              disabled={readOnly}>
-                              {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
-                            </select>
+                          <div className="pu-phase-row" style={{ gridTemplateColumns: isCompact ? "1fr" : "2fr 1fr" }}>
+                            {!isCompact && (
+                              <select value={project.phase || "Analysis"}
+                                onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
+                                className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis", "phase-select-small")}
+                                disabled={readOnly}>
+                                {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
+                              </select>
+                            )}
                             <input type="text" value={project.priority || ""}
                               onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
                               className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
-                              disabled={readOnly} />
+                              disabled={readOnly || isCompact} />
                           </div>
                         </td>
 
                         {/* Project Process (Checkboxes) */}
-                        <td className="td-process">
-                          <div className="pu-checkbox-grid">
-                            {[
-                              { label: "BRD", field: "checkbox_bc" },
-                              { label: "Trello", field: "checkbox_trello" },
-                              { label: "WA", field: "checkbox_wa" },
-                              { label: "WS", field: "checkbox_ws" }
-                            ].map((item) => (
-                              <label key={item.field} className="pu-checkbox-label">
+                        {!isCompact && (
+                          <>
+                            <td className="td-process">
+                              <div className="pu-checkbox-grid">
+                                {[
+                                  { label: "BRD", field: "checkbox_bc" },
+                                  { label: "Trello", field: "checkbox_trello" },
+                                  { label: "WA", field: "checkbox_wa" },
+                                  { label: "WS", field: "checkbox_ws" }
+                                ].map((item) => {
+                                  const dirty = isDirty(project.project_code, item.field);
+                                  const dbUpdated = !dirty && isDbUpdated(project, item.field);
+                                  const labelCls = `pu-checkbox-label${dirty ? " dirty" : ""}${dbUpdated ? " db-updated" : ""}`;
+                                  
+                                  return (
+                                    <label key={item.field} className={labelCls}>
+                                      <input
+                                        type="checkbox"
+                                        checked={(() => {
+                                          const val = project[item.field];
+                                          // null/undefined/empty means CHECKED
+                                          if (val === null || val === undefined || val === "") return true;
+                                          // 1 (or "1") means UNCHECKED
+                                          if (val === 1 || val === "1" || val === 1.0 || val === "1.0") return false;
+                                          return false; // default to unchecked for other values
+                                        })()}
+                                        onChange={(e) => {
+                                          const newVal = e.target.checked ? null : 1;
+                                          handleUpdate(project.project_code, item.field, newVal);
+                                        }}
+                                        disabled={readOnly}
+                                      />
+                                      <span>{item.label}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </td>
+
+                            <td className="td-estimate">
+                              <div className="pu-estimate-wrap">
+                                <span className="pu-estimate-label">DAYS</span>
                                 <input
-                                  type="checkbox"
-                                  checked={(() => {
-                                    const val = project[item.field];
-                                    // null/undefined/empty means CHECKED
-                                    if (val === null || val === undefined || val === "") return true;
-                                    // 1 (or "1") means UNCHECKED
-                                    if (val === 1 || val === "1" || val === 1.0 || val === "1.0") return false;
-                                    return false; // default to unchecked for other values
+                                  type="number"
+                                  value={(() => {
+                                    const val = project.estimated_days;
+                                    if (val === null || val === undefined || val === "") return "";
+                                    const num = parseFloat(val);
+                                    if (isNaN(num)) return val;
+                                    return num % 1 === 0 ? num.toString() : num.toString();
                                   })()}
-                                  onChange={(e) => {
-                                    // If user wants it checked -> set to null
-                                    // If user wants it unchecked -> set to 1
-                                    const newVal = e.target.checked ? null : 1;
-                                    console.log(`Inverted Check ${item.field} for ${project.project_code}:`, newVal);
-                                    handleUpdate(project.project_code, item.field, newVal);
-                                  }}
+                                  onChange={(e) => handleUpdate(project.project_code, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
+                                  className={cellInputClass(project.project_code, "estimated_days", project.estimated_days, "estimate-input")}
                                   disabled={readOnly}
                                 />
-                                <span>{item.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </td>
-
-                        {/* Estimate Days */}
-                        <td className="td-estimate">
-                          <div className="pu-estimate-wrap">
-                            <span className="pu-estimate-label">DAYS</span>
-                            <input
-                              type="number"
-                              value={(() => {
-                                const val = project.estimated_days;
-                                if (val === null || val === undefined || val === "") return "";
-                                const num = parseFloat(val);
-                                if (isNaN(num)) return val;
-                                return num % 1 === 0 ? num.toString() : num.toString();
-                              })()}
-                              onChange={(e) => handleUpdate(project.project_code, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
-                              className={cellInputClass(project.project_code, "estimated_days", project.estimated_days, "estimate-input")}
-                              disabled={readOnly}
-                            />
-                          </div>
-                        </td>
+                              </div>
+                            </td>
+                          </>
+                        )}
                       </tr>
 
 
@@ -539,7 +674,7 @@ function ProjectUpdateComponent(props) {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="7">
+                    <td colSpan={isCompact ? 5 : 7}>
                       <div className="pu-empty-state">
                         <Search size={24} />
                         <p>No projects match your current filters.</p>

@@ -35,17 +35,17 @@ def get_user_by_username(username):
     if not supabase: return None
     
     try:
-        # Try fetching with the new column
-        res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until, employee:employee(project_update_access)').eq('username', username).execute()
+        # Try fetching with employee details
+        res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until, employee:employee(employee_name, project_update_access)').eq('username', username).execute()
     except Exception:
-        # Fallback if column doesn't exist
+        # Fallback if employee table join fails or schema differs
         res = supabase.table('users').select('id, employee_id, username, password, failed_attempts, locked_until').eq('username', username).execute()
         
     data = res.data
     if data:
         u = data[0]
         emp = u.get('employee') or {}
-        return (u['id'], u['employee_id'], u['username'], u['password'], u['failed_attempts'], u['locked_until'], emp.get('project_update_access', False))
+        return (u['id'], u['employee_id'], u['username'], u['password'], u['failed_attempts'], u['locked_until'], emp.get('project_update_access', False), emp.get('employee_name'))
     return None
 
 def update_user_lockout(username, failed_attempts, locked_until=None):
@@ -497,14 +497,14 @@ def import_project_updates(df):
 
         # Map DB fields to potential Excel column aliases for robust matching
         field_aliases = {
-            'project_name': ['Project', 'Project Name', 'Project_Name'],
+            'project_name': ['Project', 'Project Name', 'Project_Name', 'Priority'],
             'priority': ['Job Priority', 'Priority', 'Job_Priority'],
-            'status': ['Status', 'Project Status'],
+            'status': ['Status', 'Project Status', 'Search_Project'],
             'lead_engineer': ['Lead engineer', 'Lead Engineer', 'Lead'],
             'trello_link': ['Trello', 'Trello Link', 'Trello_Link'],
             'start_date': ['Start Date', 'Date Start', 'Date_Start', 'Start'],
-            'end_date': ['End Date', 'Date End', 'Finish Date', 'Date Finish', 'Finish', 'Date_Finish', 'Date Finish'],
-            'phase': ['Phase', 'Project Phase'],
+            'end_date': ['End Date', 'Date End', 'Finish Date', 'Date Finish', 'Finish', 'Date_Finish'],
+            'phase': ['Phase', 'Project Phase', 'Current Phase_g'],
             'prototype_link': ['Prototype', 'Prototype Link', 'Prototype_Link'],
             'slack_link': ['Slack', 'Slack Link', 'Slack URL', 'Slack_Link'],
             'estimated_days': ['Estimated Days', 'Estimate Days', 'Days'],
@@ -515,7 +515,6 @@ def import_project_updates(df):
         }
 
         # Pre-resolve which column name to use for each DB field based on the uploaded DataFrame columns
-        # We search case-sensitively first, then case-insensitively if needed.
         col_mapping = {}
         df_cols_lower = {str(c).strip().lower(): str(c).strip() for c in df.columns}
         
@@ -543,7 +542,6 @@ def import_project_updates(df):
         cleared_count = 0
 
         # Data fields to process: (DB Field, Parser, Default)
-        # Note: excel_f is now looked up via col_mapping
         data_fields = [
             ('project_name', lambda x: str(x).strip() if pd.notna(x) else "", ""),
             ('priority', _parse_priority, None),
@@ -569,15 +567,35 @@ def import_project_updates(df):
 
             record = {"project_code": code}
             
+            # Special check for project_name fallback: 
+            # If 'Project' is empty but 'Priority' contains the name (as in some exports)
+            # we already handle it by having 'Priority' in field_aliases['project_name'].
+            # However, if BOTH exist and 'Project' is empty, we might want to prefer 'Priority'.
+            # Let's adjust the parser for project_name.
+            proj_col = col_mapping.get('project_name')
+            raw_proj = row.get(proj_col) if proj_col else None
+            
+            # If the primary name column is empty, check other aliases
+            if pd.isna(raw_proj) or str(raw_proj).strip() == "":
+                for alt_alias in field_aliases['project_name']:
+                    if alt_alias in df.columns:
+                        alt_val = row.get(alt_alias)
+                        if pd.notna(alt_val) and str(alt_val).strip() != "":
+                            raw_proj = alt_val
+                            break
+            
             if code in existing_map:
                 existing = existing_map[code]
                 row_changed = False
                 row_preserved = False
                 
                 for db_f, parser, default in data_fields:
-                    excel_f = col_mapping.get(db_f)
-                    raw_val = row.get(excel_f) if excel_f else None
-                    imp_val = parser(raw_val) if raw_val is not None else default
+                    if db_f == 'project_name':
+                        imp_val = str(raw_proj).strip() if pd.notna(raw_proj) else default
+                    else:
+                        excel_f = col_mapping.get(db_f)
+                        raw_val = row.get(excel_f) if excel_f else None
+                        imp_val = parser(raw_val) if raw_val is not None else default
                     
                     flag_col = f"{db_f}_updated"
                     is_updated = existing.get(flag_col, False)

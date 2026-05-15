@@ -18,7 +18,7 @@ else:
     )
 
 
-def project_update_component(projects, lead_engineers, phase_options=None, status_options=None, read_only=False, key=None):
+def project_update_component(projects, lead_engineers, current_user="", user_role="employee", phase_options=None, status_options=None, read_only=False, is_compact=False, key=None):
     """
     Render the React-based Project Update table.
 
@@ -28,12 +28,18 @@ def project_update_component(projects, lead_engineers, phase_options=None, statu
         List of project dicts from the database.
     lead_engineers : list[str]
         Sorted list of unique lead engineer names.
+    current_user : str, optional
+        Name of the currently logged-in user to set as default filter.
+    user_role : str, optional
+        Role of the user ('admin' or 'employee').
     phase_options : list[str], optional
         Phase dropdown options.
     status_options : list[str], optional
         Status dropdown options.
     read_only : bool, optional
         If True, prevents editing in the UI.
+    is_compact : bool, optional
+        If True, renders a simplified report view.
     key : str, optional
         Streamlit widget key.
 
@@ -52,9 +58,12 @@ def project_update_component(projects, lead_engineers, phase_options=None, statu
     component_value = _component_func(
         projects=projects,
         lead_engineers=lead_engineers,
+        current_user=current_user,
+        user_role=user_role,
         phase_options=phase_options,
         status_options=status_options,
         read_only=read_only,
+        is_compact=is_compact,
         key=key,
         default=None,
     )

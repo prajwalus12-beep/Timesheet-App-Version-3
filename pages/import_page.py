@@ -85,9 +85,17 @@ def render_import_page():
                     st.error(msg)
         
         sample_update_proj = pd.DataFrame(
-            [["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123", "https://slack.com/123", "https://figma.com/123", "2025-01-01", "2025-06-30"]],
-            columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello', 'Slack', 'Prototype', 'Start Date', 'End Date']
+            [[
+                "852", "1", "St Paul’s College Trip Payment", "Not started", "Kritika Wadhwa", 
+                "https://trello.com/...", "https://slack.com/...", "https://figma.com/...", 
+                "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1"
+            ]],
+            columns=[
+                'Job No', 'Job Priority', 'Priority', 'Search_Project', 'Lead engineer', 
+                'Trello', 'Slack', 'Prototype', 'Date Start', 'Date Finish', 'Current Phase_g',
+                'CheckBoxe BC', 'CheckBoxe Trello', 'CheckBoxe WA', 'CheckBoxe WS'
+            ]
         )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer'. Optional: 'Trello', 'Slack', 'Prototype', 'Start Date', 'End Date'.")
+        st.info("Required: 'Job No', 'Job Priority' (numeric), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS).")
         st.markdown('</div>', unsafe_allow_html=True)
