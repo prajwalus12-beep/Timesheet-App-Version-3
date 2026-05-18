@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Streamlit, withStreamlitConnection } from "streamlit-component-lib";
-import { ExternalLink, Search, Filter, Download, X, Info, Save, Link } from "lucide-react";
+import { ExternalLink, Search, Filter, Download, X, Info, Save, Link, ChevronDown, ChevronUp } from "lucide-react";
 import "./styles.css";
 
 function ProjectUpdateComponent(props) {
@@ -40,17 +40,31 @@ function ProjectUpdateComponent(props) {
   }, [serverProjects]);
 
   // Filter States
-  const isAdmin = args.user_role === "admin";
+  const isAdmin = String(args.user_role || "").toLowerCase() === "admin";
   const [filterName, setFilterName] = useState("");
   const [filterCodeMin, setFilterCodeMin] = useState("");
   const [filterCodeMax, setFilterCodeMax] = useState("");
   const [filterLead, setFilterLead] = useState(isAdmin ? "" : (args.current_user || ""));
-  const [filterPriorityMin, setFilterPriorityMin] = useState(isAdmin ? "" : "1");
-  const [filterPriorityMax, setFilterPriorityMax] = useState(isAdmin ? "" : "1");
+  const [filterPriorityMin, setFilterPriorityMin] = useState("");
+  const [filterPriorityMax, setFilterPriorityMax] = useState("");
   const [filterPhase, setFilterPhase] = useState([]);
   const [filterStatus, setFilterStatus] = useState(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
   const [filterUpdatedOnly, setFilterUpdatedOnly] = useState(false);
   const [filterShowCompleted, setFilterShowCompleted] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  // Sort States
+  const [sortField, setSortField] = useState('project_code');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'project_name' ? 'asc' : 'desc');
+    }
+  };
 
   // Adjust iframe height after each render
   useEffect(() => { Streamlit.setFrameHeight(); });
@@ -108,13 +122,35 @@ function ProjectUpdateComponent(props) {
     });
   }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
+  const sortedProjects = useMemo(() => {
+    return [...filteredProjects].sort((a, b) => {
+      let valA = a[sortField];
+      let valB = b[sortField];
+      
+      if (sortField === 'project_code') {
+        valA = parseInt((valA || "0").replace(/\D/g, ""), 10) || 0;
+        valB = parseInt((valB || "0").replace(/\D/g, ""), 10) || 0;
+      } else if (sortField === 'start_date' || sortField === 'end_date') {
+        valA = valA ? new Date(valA).getTime() : 0;
+        valB = valB ? new Date(valB).getTime() : 0;
+      } else {
+        valA = (valA || "").toString().toLowerCase();
+        valB = (valB || "").toString().toLowerCase();
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredProjects, sortField, sortOrder]);
+
   const resetFilters = () => {
     setFilterName(""); setFilterCodeMin(""); setFilterCodeMax("");
-    setFilterLead(isAdmin ? "" : (args.current_user || ""));
-    setFilterPriorityMin(isAdmin ? "" : "1");
-    setFilterPriorityMax(isAdmin ? "" : "1");
+    setFilterLead("");
+    setFilterPriorityMin("");
+    setFilterPriorityMax("");
     setFilterPhase([]);
-    setFilterStatus(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
+    setFilterStatus([]);
     setFilterUpdatedOnly(false);
     setFilterShowCompleted(false);
   };
@@ -125,7 +161,7 @@ function ProjectUpdateComponent(props) {
   // Reset display count when filters or data change
   useEffect(() => {
     setDisplayCount(30);
-  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, projects]);
+  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted, projects, sortField, sortOrder]);
 
   const handleScroll = (e) => {
     const { scrollHeight, scrollTop, clientHeight } = e.target;
@@ -189,7 +225,6 @@ function ProjectUpdateComponent(props) {
       }
     });
     if (Object.keys(edits).length > 0) {
-      setIsSaving(true);
       Streamlit.setComponentValue({ action: "save", edits: edits });
     }
   }, [projects, serverProjects]);
@@ -350,130 +385,186 @@ function ProjectUpdateComponent(props) {
           </div>
         )}
 
-        {/* Quick Filters - Hide in compact mode */}
-        {!isCompact && (
-          <div className="pu-quick-filters">
-            <span className="pu-quick-label">QUICK FILTER:</span>
-            <label className={`pu-toggle ${filterUpdatedOnly ? "active" : ""}`}>
-              <input type="checkbox" checked={filterUpdatedOnly} onChange={(e) => setFilterUpdatedOnly(e.target.checked)} />
-              <span>Show only updated</span>
-            </label>
-            <label className={`pu-toggle ${filterShowCompleted ? "active" : ""}`}>
-              <input type="checkbox" checked={filterShowCompleted} onChange={(e) => setFilterShowCompleted(e.target.checked)} />
-              <span>Show completed records</span>
-            </label>
-          </div>
-        )}
-
         {/* Filters */}
         <div className="pu-filters">
-          <div className="pu-filters-header">
-            <Filter size={18} />
-            <span>Filters</span>
+          <div 
+            className="pu-filters-header" 
+            style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", marginBottom: isFiltersOpen ? "1rem" : "0" }}
+            onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <Filter size={18} />
+              <span>Filters</span>
+            </div>
+            <div>
+              {isFiltersOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </div>
           </div>
-          <div className="pu-filters-grid">
+          {isFiltersOpen && (
+            <div className="pu-filters-grid">
 
-            {/* Project Name */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Project Name</label>
-              <div className="pu-filter-input-wrap">
-                <input
-                  type="text"
-                  placeholder="Search Project Name..."
-                  value={filterName}
-                  onChange={(e) => setFilterName(e.target.value)}
-                  className="pu-filter-input has-icon"
-                />
-                <Search size={14} className="pu-filter-search-icon" />
-              </div>
-            </div>
-
-            {/* Code Range */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Project Code Range</label>
-              <div className="pu-filter-range">
-                <input type="number" placeholder="Min" value={filterCodeMin}
-                  onChange={(e) => setFilterCodeMin(e.target.value)} className="pu-filter-input" />
-                <span className="pu-range-sep">–</span>
-                <input type="number" placeholder="Max" value={filterCodeMax}
-                  onChange={(e) => setFilterCodeMax(e.target.value)} className="pu-filter-input" />
-              </div>
-            </div>
-
-            {/* Lead Engineer */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Lead Engineer</label>
-              <select value={filterLead} onChange={(e) => setFilterLead(e.target.value)} className="pu-filter-select">
-                <option value="">All Engineers</option>
-                {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
-              </select>
-            </div>
-
-            {/* Priority Range */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Priority (Min - Max)</label>
-              <div className="pu-filter-range">
-                <input type="number" placeholder="Min" value={filterPriorityMin} onChange={(e) => setFilterPriorityMin(e.target.value)} className="pu-filter-input" />
-                <span className="pu-range-sep">-</span>
-                <input type="number" placeholder="Max" value={filterPriorityMax} onChange={(e) => setFilterPriorityMax(e.target.value)} className="pu-filter-input" />
-              </div>
-            </div>
-
-
-            {/* Phase - Hide in compact mode */}
-            {!isCompact && (
+              {/* Project Name */}
               <div className="pu-filter-group">
-                <label className="pu-filter-label">Phase</label>
-                <MultiSelect 
-                  options={phaseOptions}
-                  selected={filterPhase}
-                  onChange={setFilterPhase}
-                  placeholder="All Phases"
-                />
-              </div>
-            )}
-
-            {/* Status + Clear */}
-            <div className="pu-filter-group">
-              <label className="pu-filter-label">Status</label>
-              <div className="pu-status-row">
-                <MultiSelect 
-                  options={statusOptions}
-                  selected={filterStatus}
-                  onChange={setFilterStatus}
-                  placeholder="All Statuses"
-                />
-                <button className="pu-clear-btn" onClick={resetFilters} title="Clear all filters">Clear</button>
-              </div>
-            </div>
-
-            {/* Quick Filters - Hide in compact mode */}
-            {!isCompact && (
-              <div className="pu-filter-group pu-filter-group--full">
-                <label className="pu-filter-label">Quick Filters</label>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button
-                    className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
-                    onClick={() => setFilterUpdatedOnly((v) => !v)}
-                    title="Show only rows with highlighted (updated) fields"
-                  >
-                    <span className="pu-updated-dot" />
-                    Updated Records Only
-                  </button>
-                  <button
-                    className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
-                    onClick={() => setFilterShowCompleted((v) => !v)}
-                    style={{ borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : "" }}
-                    title="Show only completed projects"
-                  >
-                    <span className="pu-updated-dot" style={{ backgroundColor: filterShowCompleted ? "#10b981" : "" }} />
-                    Completed Records
-                  </button>
+                <label className="pu-filter-label">Project Name</label>
+                <div className="pu-filter-input-wrap">
+                  <input
+                    type="text"
+                    placeholder="Search Project Name..."
+                    value={filterName}
+                    onChange={(e) => setFilterName(e.target.value)}
+                    className="pu-filter-input has-icon"
+                  />
+                  <Search size={14} className="pu-filter-search-icon" />
                 </div>
               </div>
-            )}
 
-          </div>
+              {/* Code Range */}
+              <div className="pu-filter-group">
+                <label className="pu-filter-label">Project Code Range</label>
+                <div className="pu-filter-range">
+                  <input type="number" placeholder="Min" value={filterCodeMin}
+                    onChange={(e) => setFilterCodeMin(e.target.value)} className="pu-filter-input" />
+                  <span className="pu-range-sep">–</span>
+                  <input type="number" placeholder="Max" value={filterCodeMax}
+                    onChange={(e) => setFilterCodeMax(e.target.value)} className="pu-filter-input" />
+                </div>
+              </div>
+
+              {/* Lead Engineer */}
+              <div className="pu-filter-group">
+                <label className="pu-filter-label">Lead Engineer</label>
+                <select value={filterLead} onChange={(e) => setFilterLead(e.target.value)} className="pu-filter-select">
+                  <option value="">All Engineers</option>
+                  {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
+                </select>
+              </div>
+
+              {/* Priority Range */}
+              <div className="pu-filter-group">
+                <label className="pu-filter-label">Priority (Min - Max)</label>
+                <div className="pu-filter-range">
+                  <input type="number" placeholder="Min" value={filterPriorityMin} onChange={(e) => setFilterPriorityMin(e.target.value)} className="pu-filter-input" />
+                  <span className="pu-range-sep">-</span>
+                  <input type="number" placeholder="Max" value={filterPriorityMax} onChange={(e) => setFilterPriorityMax(e.target.value)} className="pu-filter-input" />
+                </div>
+              </div>
+
+
+              {/* Phase - Hide in compact mode */}
+              {!isCompact && (
+                <div className="pu-filter-group">
+                  <label className="pu-filter-label">Phase</label>
+                  <MultiSelect 
+                    options={phaseOptions}
+                    selected={filterPhase}
+                    onChange={setFilterPhase}
+                    placeholder="All Phases"
+                  />
+                </div>
+              )}
+
+              {/* Status + Clear */}
+              <div className="pu-filter-group">
+                <label className="pu-filter-label">Status</label>
+                <div className="pu-status-row">
+                  <MultiSelect 
+                    options={statusOptions}
+                    selected={filterStatus}
+                    onChange={setFilterStatus}
+                    placeholder="All Statuses"
+                  />
+                  <button className="pu-clear-btn" onClick={resetFilters} title="Clear all filters">Clear</button>
+                </div>
+              </div>
+
+              {/* Quick Filters - Hide in compact mode */}
+              {!isCompact && (
+                <div className="pu-filter-group pu-filter-group--full">
+                  <label className="pu-filter-label">Quick Filters</label>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      className={`pu-updated-toggle${filterUpdatedOnly ? " active" : ""}`}
+                      onClick={() => setFilterUpdatedOnly((v) => !v)}
+                      title="Show only rows with highlighted (updated) fields"
+                    >
+                      <span className="pu-updated-dot" />
+                      Updated Records Only
+                    </button>
+                    <button
+                      className={`pu-updated-toggle${filterShowCompleted ? " active" : ""}`}
+                      onClick={() => setFilterShowCompleted((v) => !v)}
+                      style={{ borderColor: filterShowCompleted ? "#10b981" : "", color: filterShowCompleted ? "#10b981" : "" }}
+                      title="Show only completed projects"
+                    >
+                      <span className="pu-updated-dot" style={{ backgroundColor: filterShowCompleted ? "#10b981" : "" }} />
+                      Completed Records
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+
+        {/* Sort Controls */}
+        <div className="pu-sort-controls" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "12px", padding: "10px 15px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginRight: "5px", letterSpacing: "0.05em" }}>Sort By:</span>
+          
+          <button 
+            onClick={() => handleSort('start_date')}
+            style={{ 
+              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+              border: sortField === 'start_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+              background: sortField === 'start_date' ? "#eff6ff" : "#ffffff",
+              color: sortField === 'start_date' ? "#1d4ed8" : "#475569",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+            }}
+          >
+            START DATE {sortField === 'start_date' && (sortOrder === 'asc' ? '▲' : '▼')}
+          </button>
+
+          <button 
+            onClick={() => handleSort('end_date')}
+            style={{ 
+              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+              border: sortField === 'end_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+              background: sortField === 'end_date' ? "#eff6ff" : "#ffffff",
+              color: sortField === 'end_date' ? "#1d4ed8" : "#475569",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+            }}
+          >
+            END DATE {sortField === 'end_date' && (sortOrder === 'asc' ? '▲' : '▼')}
+          </button>
+          <button 
+            onClick={() => handleSort('project_code')}
+            style={{ 
+              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+              border: sortField === 'project_code' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+              background: sortField === 'project_code' ? "#eff6ff" : "#ffffff",
+              color: sortField === 'project_code' ? "#1d4ed8" : "#475569",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+            }}
+          >
+            PROJECT CODE {sortField === 'project_code' && (sortOrder === 'asc' ? '▲' : '▼')}
+          </button>
+
+          <button 
+            onClick={() => handleSort('project_name')}
+            style={{ 
+              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+              border: sortField === 'project_name' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+              background: sortField === 'project_name' ? "#eff6ff" : "#ffffff",
+              color: sortField === 'project_name' ? "#1d4ed8" : "#475569",
+              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+            }}
+          >
+            PROJECT NAME {sortField === 'project_name' && (sortOrder === 'asc' ? '▲' : '▼')}
+          </button>
         </div>
 
         {/* Data Table — Two-line row layout matching screenshot */}
@@ -508,8 +599,8 @@ function ProjectUpdateComponent(props) {
                 </tr>
               </thead>
               <tbody>
-                {filteredProjects.length > 0 ? (
-                  filteredProjects.slice(0, displayCount).map((project, index) => (
+                {sortedProjects.length > 0 ? (
+                  sortedProjects.slice(0, displayCount).map((project, index) => (
 
                     <React.Fragment key={project.project_code}>
                       {/* Primary row */}
@@ -528,25 +619,46 @@ function ProjectUpdateComponent(props) {
                             disabled={readOnly || isCompact}
                             title={project.project_name || "Project Name is required"}
                           />
-                          <div className="pu-url-row" style={{ gridTemplateColumns: isCompact ? "1fr" : "repeat(3, 1fr)" }}>
-                            <input type="text" value={project.trello_link || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
-                              className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field-small")}
-                              disabled={readOnly || isCompact}
-                              placeholder="Trello URL" />
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
+                            <div className="pu-url-input-wrapper">
+                              <input type="text" value={project.trello_link || ""}
+                                onChange={(e) => handleUpdate(project.project_code, "trello_link", e.target.value)}
+                                className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field-small")}
+                                disabled={readOnly || isCompact}
+                                placeholder="Trello URL" />
+                              {project.trello_link && project.trello_link.startsWith("http") && (
+                                <a href={project.trello_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Trello">
+                                  <Link size={12} />
+                                </a>
+                              )}
+                            </div>
                             {!isCompact && (
-                              <>
-                                <input type="text" value={project.prototype_link || ""}
-                                  onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
-                                  className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
-                                  disabled={readOnly}
-                                  placeholder="Prototype URL" />
-                                <input type="text" value={project.slack_link || ""}
-                                  onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
-                                  className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
-                                  disabled={readOnly}
-                                  placeholder="Slack URL" />
-                              </>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.15rem" }}>
+                                <div className="pu-url-input-wrapper">
+                                  <input type="text" value={project.prototype_link || ""}
+                                    onChange={(e) => handleUpdate(project.project_code, "prototype_link", e.target.value)}
+                                    className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
+                                    disabled={readOnly}
+                                    placeholder="Prototype URL" />
+                                  {project.prototype_link && project.prototype_link.startsWith("http") && (
+                                    <a href={project.prototype_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Prototype">
+                                      <Link size={12} />
+                                    </a>
+                                  )}
+                                </div>
+                                <div className="pu-url-input-wrapper">
+                                  <input type="text" value={project.slack_link || ""}
+                                    onChange={(e) => handleUpdate(project.project_code, "slack_link", e.target.value)}
+                                    className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
+                                    disabled={readOnly}
+                                    placeholder="Slack URL" />
+                                  {project.slack_link && project.slack_link.startsWith("http") && (
+                                    <a href={project.slack_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Slack">
+                                      <Link size={12} />
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -561,7 +673,7 @@ function ProjectUpdateComponent(props) {
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
                           {!isCompact && (
-                            <div className="pu-date-row">
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                               <div className="pu-date-input-wrap">
                                 <input type="date" value={project.start_date || ""}
                                   onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
@@ -586,7 +698,7 @@ function ProjectUpdateComponent(props) {
                             disabled={readOnly || isCompact}>
                             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                           </select>
-                          <div className="pu-phase-row" style={{ gridTemplateColumns: isCompact ? "1fr" : "2fr 1fr" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                             {!isCompact && (
                               <select value={project.phase || "Analysis"}
                                 onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
@@ -598,7 +710,8 @@ function ProjectUpdateComponent(props) {
                             <input type="text" value={project.priority || ""}
                               onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
                               className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
-                              disabled={readOnly || isCompact} />
+                              disabled={readOnly || isCompact}
+                              placeholder="Priority" />
                           </div>
                         </td>
 
