@@ -67,7 +67,6 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         'trello_link': 'Trello',
         'start_date': 'Start Date',
         'end_date': 'End Date',
-        'phase': 'Phase',
         'prototype_link': 'Prototype',
         'slack_link': 'Slack',
         'estimated_days': 'Estimated Days',
