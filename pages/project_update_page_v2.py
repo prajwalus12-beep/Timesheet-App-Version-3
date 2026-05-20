@@ -133,6 +133,26 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     if 'end_date' in clean_df.columns:
         clean_df['end_date'] = clean_df['end_date'].apply(_format_date_to_ddmmyyyy)
 
+    # ── Convert Job No and Lead Engineer to numeric where possible ───────────
+    def _to_numeric_where_possible(v):
+        if pd.isna(v) or v is None:
+            return v
+        s = str(v).strip()
+        if s.lower() in ('nan', 'none', 'nat', ''):
+            return None
+        try:
+            f_val = float(s)
+            if f_val == int(f_val):
+                return int(f_val)
+            return f_val
+        except (ValueError, TypeError):
+            return v
+
+    if 'project_code' in clean_df.columns:
+        clean_df['project_code'] = clean_df['project_code'].apply(_to_numeric_where_possible)
+    if 'lead_engineer' in clean_df.columns:
+        clean_df['lead_engineer'] = clean_df['lead_engineer'].apply(_to_numeric_where_possible)
+
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
 
     renamed_df = clean_df[export_cols_keys].rename(columns=export_cols_map)
