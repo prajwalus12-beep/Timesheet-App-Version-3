@@ -96,6 +96,43 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     if 'actual_days' in clean_df.columns:
         clean_df['actual_days'] = clean_df['actual_days'].apply(_round_actual_days)
 
+    # ── Map Lead Engineer name to Employee ID ────────────────────────────────
+    all_emps = _cached_employees()
+    name_to_id = {}
+    if not all_emps.empty:
+        name_to_id = {
+            str(row['employee_name']).strip().lower(): str(row['employee_id']).strip()
+            for _, row in all_emps.iterrows()
+            if pd.notna(row['employee_name']) and pd.notna(row['employee_id'])
+        }
+
+    if 'lead_engineer' in clean_df.columns:
+        def _map_lead_engineer(v):
+            if pd.isna(v) or not v or str(v).strip().lower() in ('nan', 'none', 'nat', ''):
+                return ''
+            s = str(v).strip().lower()
+            return name_to_id.get(s, v)
+        clean_df['lead_engineer'] = clean_df['lead_engineer'].apply(_map_lead_engineer)
+
+    # ── Standardise Date Formats to dd/mm/yyyy ───────────────────────────────
+    def _format_date_to_ddmmyyyy(v):
+        if pd.isna(v) or not v or str(v).strip().lower() in ('nan', 'none', 'nat', ''):
+            return ''
+        try:
+            if hasattr(v, 'strftime'):
+                return v.strftime('%d/%m/%Y')
+            dt = pd.to_datetime(v)
+            if pd.notna(dt):
+                return dt.strftime('%d/%m/%Y')
+        except Exception:
+            pass
+        return str(v)
+
+    if 'start_date' in clean_df.columns:
+        clean_df['start_date'] = clean_df['start_date'].apply(_format_date_to_ddmmyyyy)
+    if 'end_date' in clean_df.columns:
+        clean_df['end_date'] = clean_df['end_date'].apply(_format_date_to_ddmmyyyy)
+
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
 
     renamed_df = clean_df[export_cols_keys].rename(columns=export_cols_map)
