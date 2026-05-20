@@ -241,7 +241,6 @@ function ProjectUpdateComponent(props) {
           }
         }
         if (!p.trello_link) errs.push("Missing Trello link");
-        if (!p.slack_link) errs.push("Missing slack link");
         if (!p.estimated_days) errs.push("Missing estimates");
         if (parseFloat(p.actual_days || 0) > 1 && p.status === "Not started") {
           errs.push("Actual says more than one but the status is not started");
