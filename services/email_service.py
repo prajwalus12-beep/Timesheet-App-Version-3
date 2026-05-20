@@ -5,16 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-
-# Load env file
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-if os.path.exists(dotenv_path):
-    with open(dotenv_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, val = line.split('=', 1)
-                os.environ[key.strip()] = val.strip()
+import streamlit as st
 
 def generate_validation_pdf(employee_name, projects):
     """
@@ -130,19 +121,19 @@ def send_reminder_email(employee_id, recipient_email, employee_name, projects):
     """
     from database.queries import create_reminder_log, update_reminder_log
 
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = os.getenv("SMTP_PORT")
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASS")
-    smtp_encryption = os.getenv("SMTP_ENCRYPTION", "starttls").lower()
-
-    if not all([smtp_host, smtp_port, smtp_user, smtp_pass]):
-        return False, "SMTP configuration is incomplete in .env file."
+    try:
+        smtp_host = st.secrets["SMTP_HOST"]
+        smtp_port = st.secrets["SMTP_PORT"]
+        smtp_user = st.secrets["SMTP_USER"]
+        smtp_pass = st.secrets["SMTP_PASS"]
+        smtp_encryption = st.secrets.get("SMTP_ENCRYPTION", "starttls").lower()
+    except KeyError as e:
+        return False, f"Missing {e.args[0]} in Streamlit secrets."
 
     try:
         smtp_port = int(smtp_port)
     except ValueError:
-        return False, "Invalid SMTP_PORT in .env file."
+        return False, "Invalid SMTP_PORT in Streamlit secrets."
 
     # Construct Email Content
     subject = "Action Required: to fill project status for missing field"
