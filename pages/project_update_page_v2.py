@@ -55,9 +55,8 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     highlight_updated : bool
         If True, updated cells get a yellow background in the Excel file.
     only_updated_values : bool
-        If True, cell values for non-updated fields are blanked out so the
-        exported file contains **only** the changed data.  Row-identifying
-        columns (project_code, priority, project_name) are always kept.
+        Deprecated. Kept for backwards compatibility but ignored to ensure
+        all existing project fields/data are fully preserved and exported.
     """
     export_cols_map = {
         'project_code': 'Job No',
@@ -68,6 +67,7 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         'trello_link': 'Trello',
         'start_date': 'Start Date',
         'end_date': 'End Date',
+        'phase': 'Phase',
         'prototype_link': 'Prototype',
         'slack_link': 'Slack',
         'estimated_days': 'Estimated Days',
@@ -98,24 +98,6 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         clean_df['actual_days'] = clean_df['actual_days'].apply(_round_actual_days)
 
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
-
-    # ── Blank out non-updated values when requested ──────────────────────────
-    if only_updated_values:
-        clean_df = clean_df.copy()  # avoid mutating the caller's df
-        for key in export_cols_keys:
-            if key in _always_keep:
-                continue  # always keep identifier columns
-            # Cast column to object so we can assign '' to any dtype
-            # (datetime, numeric, bool columns would otherwise reject '')
-            clean_df[key] = clean_df[key].astype(object)
-            flag_col = f"{key}_updated"
-            if flag_col in clean_df.columns:
-                # Set cell to empty where the field was NOT updated
-                mask = clean_df[flag_col] != True
-                clean_df.loc[mask, key] = ''
-            else:
-                # No flag column exists → treat as not updated → blank out
-                clean_df[key] = ''
 
     renamed_df = clean_df[export_cols_keys].rename(columns=export_cols_map)
 
