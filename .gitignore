@@ -6,3 +6,4 @@ __pycache__/
 dist/
 # build/ (Removed to allow Streamlit Cloud deployment of React components)
 automaticmanualtesting.py
+scratch/

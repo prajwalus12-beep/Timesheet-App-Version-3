@@ -10,3 +10,4 @@ cryptography
 pillow
 supabase<=2.7.4
 openpyxl
+reportlab
