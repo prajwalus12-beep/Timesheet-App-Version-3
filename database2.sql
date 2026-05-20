@@ -117,3 +117,7 @@ CHECK (checkbox_wa IS NULL OR checkbox_wa = 1);
 ALTER TABLE project_reports
 ADD CONSTRAINT chk_checkbox_ws
 CHECK (checkbox_ws IS NULL OR checkbox_ws = 1);
+
+ALTER TABLE project_reports
+ADD COLUMN actual_days DOUBLE PRECISION,
+ADD COLUMN actual_days_updated BOOLEAN NOT NULL DEFAULT FALSE;

@@ -33,8 +33,32 @@ def _invalidate_project_cache():
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _generate_excel_buffer(df, highlight_updated=False):
-    """Generate an Excel buffer for the given DataFrame, highlighting updated cells."""
+def _round_actual_days(v):
+    """Round actual_days: >=0.5 decimal rounds up, <0.5 rounds down."""
+    if v is None or (hasattr(v, '__class__') and v.__class__.__name__ in ('float', 'int') and pd.isna(v)):
+        return v
+    try:
+        import math
+        f = float(v)
+        frac = f - math.floor(f)
+        return math.ceil(f) if frac >= 0.5 else math.floor(f)
+    except (ValueError, TypeError):
+        return v
+
+def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=False):
+    """Generate an Excel buffer for the given DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Source data including ``*_updated`` flag columns.
+    highlight_updated : bool
+        If True, updated cells get a yellow background in the Excel file.
+    only_updated_values : bool
+        If True, cell values for non-updated fields are blanked out so the
+        exported file contains **only** the changed data.  Row-identifying
+        columns (project_code, priority, project_name) are always kept.
+    """
     export_cols_map = {
         'project_code': 'Job No',
         'priority': 'Job Priority',
@@ -44,15 +68,19 @@ def _generate_excel_buffer(df, highlight_updated=False):
         'trello_link': 'Trello',
         'start_date': 'Start Date',
         'end_date': 'End Date',
-        'phase': 'Phase',
         'prototype_link': 'Prototype',
         'slack_link': 'Slack',
         'estimated_days': 'Estimated Days',
+        'actual_days': 'Actual Days',
         'checkbox_bc': 'CheckBoxe BC',
         'checkbox_trello': 'CheckBoxe Trello',
         'checkbox_wa': 'CheckBoxe WA',
         'checkbox_ws': 'CheckBoxe WS'
     }
+
+    # Columns whose values are always preserved (row identifiers)
+    _always_keep = {'project_code'}
+
     clean_df = df.copy()
     
     if 'priority' in clean_df.columns:
@@ -65,7 +93,30 @@ def _generate_excel_buffer(df, highlight_updated=False):
                 return v
         clean_df['priority'] = clean_df['priority'].apply(_fmt_priority)
 
+    # Apply rounding to actual_days before export
+    if 'actual_days' in clean_df.columns:
+        clean_df['actual_days'] = clean_df['actual_days'].apply(_round_actual_days)
+
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
+
+    # ── Blank out non-updated values when requested ──────────────────────────
+    if only_updated_values:
+        clean_df = clean_df.copy()  # avoid mutating the caller's df
+        for key in export_cols_keys:
+            if key in _always_keep:
+                continue  # always keep identifier columns
+            # Cast column to object so we can assign '' to any dtype
+            # (datetime, numeric, bool columns would otherwise reject '')
+            clean_df[key] = clean_df[key].astype(object)
+            flag_col = f"{key}_updated"
+            if flag_col in clean_df.columns:
+                # Set cell to empty where the field was NOT updated
+                mask = clean_df[flag_col] != True
+                clean_df.loc[mask, key] = ''
+            else:
+                # No flag column exists → treat as not updated → blank out
+                clean_df[key] = ''
+
     renamed_df = clean_df[export_cols_keys].rename(columns=export_cols_map)
 
     buffer = io.BytesIO()
@@ -115,7 +166,7 @@ def export_dialog(df):
             updated_df = pd.DataFrame(columns=df.columns)
             
         st.caption(f"Export only the {len(updated_df)} modified projects")
-        buffer_updated = _generate_excel_buffer(updated_df, highlight_updated=True) if not updated_df.empty else b""
+        buffer_updated = _generate_excel_buffer(updated_df, highlight_updated=True, only_updated_values=True) if not updated_df.empty else b""
         st.download_button(
             "📥 Download Updated",
             data=buffer_updated,
@@ -124,6 +175,180 @@ def export_dialog(df):
             disabled=updated_df.empty,
             use_container_width=True
         )
+
+
+@st.dialog("Send Reminders", width="medium")
+def reminder_dialog(all_emps, df, displayed_project_codes):
+    """Streamlit dialog to handle sending reminders."""
+    st.write("Select the employees you want to send validation reminders to. The system will compile all validation errors for projects they are assigned as Lead Engineer.")
+    st.write("")
+    
+    if displayed_project_codes is None:
+        st.info("No projects are visible to send reminders for.")
+        return
+        
+    # Find unique lead engineers from displayed projects
+    displayed_str_codes = [str(c) for c in displayed_project_codes]
+    displayed_df = df[df['project_code'].astype(str).isin(displayed_str_codes)]
+    
+    active_leads = set(displayed_df['lead_engineer'].dropna().str.strip().str.lower())
+    
+    # Filter all_emps to only those active lead engineers
+    filtered_emps = []
+    if not all_emps.empty:
+        raw_list = all_emps.to_dict(orient='records')
+        for r in raw_list:
+            emp_name = str(r.get('employee_name', '')).strip().lower()
+            if emp_name in active_leads:
+                filtered_emps.append(r)
+                
+    if not filtered_emps:
+        st.info("No employees found for visible projects.")
+        return
+        
+    options = []
+    emp_map = {}
+    for emp in filtered_emps:
+        name = emp.get('employee_name')
+        email = emp.get('email')
+        emp_id = emp.get('employee_id')
+        if email and str(email).strip():
+            display = f"{name} ({email})"
+            options.append(display)
+            emp_map[display] = emp
+        else:
+            display = f"⚠️ {name} (No Email configured)"
+            options.append(display)
+            emp_map[display] = emp
+            
+    # Let's show Select All checkbox to easily toggle selection
+    select_all = st.checkbox("Select All Employees", value=True)
+    default_selection = options if select_all else []
+    
+    selected_displays = st.multiselect(
+        "Select Employees",
+        options=options,
+        default=default_selection,
+        label_visibility="collapsed"
+    )
+    
+    st.write("")
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+    with col2:
+        valid_selected = [emp_map[d] for d in selected_displays if emp_map[d].get('email') and str(emp_map[d].get('email')).strip()]
+        
+        if st.button("Send Email", type="primary", use_container_width=True, disabled=not valid_selected):
+            success_count = 0
+            skipped_count = 0
+            error_messages = []
+            
+            from services.email_service import send_reminder_email
+            
+            with st.spinner("Sending emails..."):
+                for emp in valid_selected:
+                    emp_id = emp.get('employee_id')
+                    emp_name = emp.get('employee_name')
+                    emp_email = emp.get('email')
+                    
+                    # Filter projects led by this employee and displayed
+                    emp_projects_df = displayed_df[displayed_df['lead_engineer'].fillna('').str.strip().str.lower() == str(emp_name).strip().lower()]
+                    
+                    emp_projects_with_issues = []
+                    for _, proj_row in emp_projects_df.iterrows():
+                        issues = []
+                        start = proj_row.get('start_date')
+                        end = proj_row.get('end_date')
+                        
+                        if not start or pd.isna(start):
+                            issues.append("Missing Start Date")
+                        if not end or pd.isna(end):
+                            issues.append("Missing End Date")
+                            
+                        if start and end and not pd.isna(start) and not pd.isna(end):
+                            try:
+                                s_dt = pd.to_datetime(start).date()
+                                e_dt = pd.to_datetime(end).date()
+                                if s_dt > e_dt:
+                                    issues.append("Start Date is after End Date")
+                            except:
+                                pass
+                                
+                        if end and not pd.isna(end):
+                            try:
+                                e_dt = pd.to_datetime(end).date()
+                                if e_dt < datetime.date.today():
+                                    issues.append("End Date is in the past")
+                            except:
+                                pass
+                                
+                        if not proj_row.get('trello_link') or not str(proj_row.get('trello_link')).strip():
+                            issues.append("Missing Trello Link")
+                        if not proj_row.get('slack_link') or not str(proj_row.get('slack_link')).strip():
+                            issues.append("Missing Slack Link")
+                            
+                        est = proj_row.get('estimated_days')
+                        if est is None or pd.isna(est) or str(est).strip() == "" or str(est) == "0":
+                            issues.append("Missing estimates")
+                            
+                        actual = proj_row.get('actual_days')
+                        status = proj_row.get('status')
+                        try:
+                            actual_val = float(actual) if actual is not None and not pd.isna(actual) else 0.0
+                            if actual_val > 1.0 and status == "Not started":
+                                issues.append("Please check the status. The actual says more than one but the status is not started")
+                        except:
+                            pass
+                            
+                        bc = proj_row.get('checkbox_bc')
+                        if bc == 1 or str(bc) == '1' or str(bc) == '1.0':
+                            issues.append("Please check the BRD check box is not checked")
+                            
+                        trello_cb = proj_row.get('checkbox_trello')
+                        if trello_cb == 1 or str(trello_cb) == '1' or str(trello_cb) == '1.0':
+                            issues.append("Please check the Trello checkbox is not checked")
+                            
+                        wa = proj_row.get('checkbox_wa')
+                        if wa == 1 or str(wa) == '1' or str(wa) == '1.0':
+                            issues.append("Please check the WA check box is not checked")
+                            
+                        ws = proj_row.get('checkbox_ws')
+                        if ws == 1 or str(ws) == '1' or str(ws) == '1.0':
+                            issues.append("Please check that the WS checkbox is not checked")
+                            
+                        if issues:
+                            emp_projects_with_issues.append({
+                                "projectCode": str(proj_row.get('project_code', '')),
+                                "projectName": str(proj_row.get('project_name', '')),
+                                "issues": issues
+                            })
+                            
+                    if not emp_projects_with_issues:
+                        skipped_count += 1
+                        continue
+                        
+                    success, msg = send_reminder_email(emp_id, emp_email, emp_name, emp_projects_with_issues)
+                    if success:
+                        success_count += 1
+                    else:
+                        error_messages.append(f"Failed to send email to {emp_name}: {msg}")
+            
+            if success_count > 0:
+                st.toast(f"📨 Successfully sent reminder emails to {success_count} employee(s).", icon="✉️")
+            if error_messages:
+                for err in error_messages:
+                    st.error(err)
+            
+            # Reset the component state by incrementing refresh key
+            st.session_state['pu_react_refresh'] = st.session_state.get('pu_react_refresh', 0) + 1
+            
+            # small delay and rerun
+            import time
+            time.sleep(1)
+            st.rerun()
 
 
 def _prepare_projects_list(df):
@@ -165,13 +390,27 @@ def _prepare_projects_list(df):
 
 @st.fragment
 def _render_react_component(projects_list, lead_engineers, phase_options, status_options,
-                             read_only, user, df):
+                             read_only, user, df, all_emps):
     """Render the React component inside a fragment so saves don't reload the full page."""
     refresh_key = st.session_state.get('pu_react_refresh', 0)
+
+    # Convert all_emps DataFrame to records dict, handling NaN values safely
+    employees_list = []
+    if not all_emps.empty:
+        raw_list = all_emps.to_dict(orient='records')
+        for r in raw_list:
+            clean_r = {}
+            for k, v in r.items():
+                if pd.isna(v) or str(v).strip().lower() in ('nan', 'none', 'nat'):
+                    clean_r[k] = None
+                else:
+                    clean_r[k] = v
+            employees_list.append(clean_r)
 
     result = project_update_component(
         projects=projects_list,
         lead_engineers=lead_engineers,
+        employees=employees_list,
         current_user=user.get("employee_name", ""),
         user_role=user.get("role", "employee"),
         phase_options=phase_options,
@@ -216,6 +455,11 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
 
     elif action == "open_export_modal":
         export_dialog(df)
+
+    elif action == "open_reminder_modal":
+        payload = result.get("payload", {})
+        displayed_project_codes = payload.get("displayedProjectCodes", [])
+        reminder_dialog(all_emps, df, displayed_project_codes)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -301,5 +545,5 @@ def render_project_update_page_v2(user):
     # ── Render React component inside a fragment ──────────────────────────────
     _render_react_component(
         projects_list, lead_engineers, phase_options, status_options,
-        read_only, user, df
+        read_only, user, df, all_emps
     )

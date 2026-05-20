@@ -18,7 +18,7 @@ else:
     )
 
 
-def project_update_component(projects, lead_engineers, current_user="", user_role="employee", phase_options=None, status_options=None, read_only=False, is_compact=False, key=None):
+def project_update_component(projects, lead_engineers, employees=None, current_user="", user_role="employee", phase_options=None, status_options=None, read_only=False, is_compact=False, key=None):
     """
     Render the React-based Project Update table.
 
@@ -58,6 +58,7 @@ def project_update_component(projects, lead_engineers, current_user="", user_rol
     component_value = _component_func(
         projects=projects,
         lead_engineers=lead_engineers,
+        employees=employees or [],
         current_user=current_user,
         user_role=user_role,
         phase_options=phase_options,

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Streamlit, withStreamlitConnection } from "streamlit-component-lib";
-import { ExternalLink, Search, Filter, Download, X, Info, Save, Link, ChevronDown, ChevronUp } from "lucide-react";
+import { ExternalLink, Search, Filter, Download, X, Info, Save, Link, ChevronDown, ChevronUp, Send, Mail } from "lucide-react";
 import "./styles.css";
 
 function ProjectUpdateComponent(props) {
@@ -9,17 +9,17 @@ function ProjectUpdateComponent(props) {
   // Data from Python
   const serverProjects = args.projects || [];
   const leadEngineers = args.lead_engineers || [];
-  const phaseOptions = args.phase_options || ["Analysis", "Design", "Development", "Testing", "Deployment", "Support"];
   const statusOptions = args.status_options || ["In progress", "Complete", "On hold", "Cancelled"];
   const readOnly = args.read_only || false;
   const isCompact = args.is_compact || false; // New prop for compact/report mode
+  const employees = args.employees || [];
 
   // Local working copy of projects
   const [projects, setProjects] = useState(() => {
     // Sort initially based on the numeric value of project_code descending
     return [...serverProjects].sort((a, b) => {
-      const codeA = parseInt((a.project_code || "0").replace(/\\D/g, ""), 10) || 0;
-      const codeB = parseInt((b.project_code || "0").replace(/\\D/g, ""), 10) || 0;
+      const codeA = parseInt((a.project_code || "0").replace(/\D/g, ""), 10) || 0;
+      const codeB = parseInt((b.project_code || "0").replace(/\D/g, ""), 10) || 0;
       return codeB - codeA;
     });
   });
@@ -47,11 +47,13 @@ function ProjectUpdateComponent(props) {
   const [filterLead, setFilterLead] = useState(isAdmin ? "" : (args.current_user || ""));
   const [filterPriorityMin, setFilterPriorityMin] = useState("");
   const [filterPriorityMax, setFilterPriorityMax] = useState("");
-  const [filterPhase, setFilterPhase] = useState([]);
   const [filterStatus, setFilterStatus] = useState(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
   const [filterUpdatedOnly, setFilterUpdatedOnly] = useState(false);
   const [filterShowCompleted, setFilterShowCompleted] = useState(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState([]);
+
+
 
   // Sort States
   const [sortField, setSortField] = useState('project_code');
@@ -73,7 +75,7 @@ function ProjectUpdateComponent(props) {
   const updatedFlagKeys = [
     "project_name_updated", "lead_engineer_updated", "priority_updated",
     "status_updated", "trello_link_updated", "start_date_updated",
-    "end_date_updated", "phase_updated", "prototype_link_updated", "slack_link_updated",
+    "end_date_updated", "prototype_link_updated", "slack_link_updated",
     "estimated_days_updated", "checkbox_bc_updated", "checkbox_trello_updated",
     "checkbox_wa_updated", "checkbox_ws_updated"
   ];
@@ -99,7 +101,6 @@ function ProjectUpdateComponent(props) {
           return false;
         }
       }
-      if (filterPhase.length > 0 && !filterPhase.includes(p.phase)) return false;
       if (filterStatus.length > 0 && !filterStatus.includes(p.status)) return false;
 
       const isComplete = p.status === "Complete";
@@ -120,7 +121,7 @@ function ProjectUpdateComponent(props) {
 
       return true;
     });
-  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted]);
+  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
   const sortedProjects = useMemo(() => {
     return [...filteredProjects].sort((a, b) => {
@@ -149,7 +150,6 @@ function ProjectUpdateComponent(props) {
     setFilterLead("");
     setFilterPriorityMin("");
     setFilterPriorityMax("");
-    setFilterPhase([]);
     setFilterStatus([]);
     setFilterUpdatedOnly(false);
     setFilterShowCompleted(false);
@@ -161,7 +161,7 @@ function ProjectUpdateComponent(props) {
   // Reset display count when filters or data change
   useEffect(() => {
     setDisplayCount(30);
-  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterPhase, filterStatus, filterUpdatedOnly, filterShowCompleted, projects, sortField, sortOrder]);
+  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted, projects, sortField, sortOrder]);
 
   const handleScroll = (e) => {
     const { scrollHeight, scrollTop, clientHeight } = e.target;
@@ -203,16 +203,20 @@ function ProjectUpdateComponent(props) {
     }).length;
   }, [projects, serverProjects]);
 
+
+
   // ---- Save ----
   const handleSave = useCallback(() => {
     const edits = {};
+    const vErrors = [];
+
     projects.forEach((p, idx) => {
       const server = serverProjects.find((sp) => sp.project_code === p.project_code);
       if (!server) return;
       const changes = {};
       const editableFields = [
         "project_name", "lead_engineer", "priority", "start_date", "end_date",
-        "status", "phase", "trello_link", "prototype_link", "slack_link",
+        "status", "trello_link", "prototype_link", "slack_link",
         "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days"
       ];
       editableFields.forEach((f) => {
@@ -221,9 +225,49 @@ function ProjectUpdateComponent(props) {
         }
       });
       if (Object.keys(changes).length > 0) {
+        const errs = [];
+        const isUnchecked = (val) => (val === 1 || val === "1" || val === 1.0 || val === "1.0");
+
+        if (!p.start_date) errs.push("Missing start date");
+        if (!p.end_date) errs.push("Missing End Date");
+        if (p.start_date && p.end_date && new Date(p.start_date) > new Date(p.end_date)) {
+          errs.push("Start Date to be <= End Date");
+        }
+        if (p.end_date) {
+          const today = new Date();
+          today.setHours(0,0,0,0);
+          if (new Date(p.end_date) < today) {
+            errs.push("End Date is in the past");
+          }
+        }
+        if (!p.trello_link) errs.push("Missing Trello link");
+        if (!p.slack_link) errs.push("Missing slack link");
+        if (!p.estimated_days) errs.push("Missing estimates");
+        if (parseFloat(p.actual_days || 0) > 1 && p.status === "Not started") {
+          errs.push("Actual says more than one but the status is not started");
+        }
+        if (isUnchecked(p.checkbox_bc)) errs.push("Please check the BRD check box is not checked");
+        if (isUnchecked(p.checkbox_trello)) errs.push("Please check the Trello checkbox is not checked");
+        if (isUnchecked(p.checkbox_wa)) errs.push("Please check the WA check box is not checked");
+        if (isUnchecked(p.checkbox_ws)) errs.push("Please check that the WS checkbox is not checked");
+
+        if (errs.length > 0) {
+          vErrors.push({ projectCode: p.project_code, name: p.project_name, errors: errs });
+        }
+
         edits[p.project_code] = changes;
       }
     });
+
+    if (vErrors.length > 0) {
+      setValidationErrors(vErrors);
+      // Automatically scroll to the top so the user sees the errors
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    setValidationErrors([]);
+
     if (Object.keys(edits).length > 0) {
       Streamlit.setComponentValue({ action: "save", edits: edits });
     }
@@ -232,6 +276,16 @@ function ProjectUpdateComponent(props) {
   // ---- Export ----
   const handleExportClick = () => {
     Streamlit.setComponentValue({ action: "open_export_modal" });
+  };
+
+  const handleOpenReminderModal = () => {
+    const displayedProjectCodes = filteredProjects.map(p => String(p.project_code));
+    Streamlit.setComponentValue({
+      action: "open_reminder_modal",
+      payload: {
+        displayedProjectCodes: displayedProjectCodes
+      }
+    });
   };
 
   // ---- Cell class helpers ----
@@ -372,8 +426,33 @@ function ProjectUpdateComponent(props) {
             <button className="pu-export-btn" onClick={handleExportClick}>
               <Download size={16} /> Export
             </button>
+            {!readOnly && !isCompact && isAdmin && (
+              <button 
+                className="pu-export-btn" 
+                onClick={handleOpenReminderModal}
+              >
+                <Send size={16} /> Send Reminder
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Validation Errors Banner */}
+        {validationErrors.length > 0 && (
+          <div className="pu-validation-banner" style={{ backgroundColor: "#fee2e2", border: "1px solid #ef4444", borderRadius: "6px", padding: "12px", marginBottom: "1rem", color: "#b91c1c" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+              <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}><Info size={16} /> Validation Errors</strong>
+              <button onClick={() => setValidationErrors([])} style={{ background: "none", border: "none", cursor: "pointer", color: "#b91c1c" }}><X size={16}/></button>
+            </div>
+            <ul style={{ margin: 0, paddingLeft: "1.5rem", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "6px" }}>
+              {validationErrors.map(ve => (
+                <li key={ve.projectCode} style={{ lineHeight: "1.4" }}>
+                  <strong>{ve.projectCode} {ve.name ? `(${ve.name})` : ""}:</strong> {ve.errors.join(" • ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Unsaved Changes Banner */}
         {!readOnly && !isCompact && editedCount > 0 && (
@@ -450,19 +529,6 @@ function ProjectUpdateComponent(props) {
               </div>
 
 
-              {/* Phase - Hide in compact mode */}
-              {!isCompact && (
-                <div className="pu-filter-group">
-                  <label className="pu-filter-label">Phase</label>
-                  <MultiSelect 
-                    options={phaseOptions}
-                    selected={filterPhase}
-                    onChange={setFilterPhase}
-                    placeholder="All Phases"
-                  />
-                </div>
-              )}
-
               {/* Status + Clear */}
               <div className="pu-filter-group">
                 <label className="pu-filter-label">Status</label>
@@ -511,33 +577,7 @@ function ProjectUpdateComponent(props) {
         <div className="pu-sort-controls" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "12px", padding: "10px 15px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
           <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginRight: "5px", letterSpacing: "0.05em" }}>Sort By:</span>
           
-          <button 
-            onClick={() => handleSort('start_date')}
-            style={{ 
-              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
-              border: sortField === 'start_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
-              background: sortField === 'start_date' ? "#eff6ff" : "#ffffff",
-              color: sortField === 'start_date' ? "#1d4ed8" : "#475569",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
-              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
-            }}
-          >
-            START DATE {sortField === 'start_date' && (sortOrder === 'asc' ? '▲' : '▼')}
-          </button>
 
-          <button 
-            onClick={() => handleSort('end_date')}
-            style={{ 
-              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
-              border: sortField === 'end_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
-              background: sortField === 'end_date' ? "#eff6ff" : "#ffffff",
-              color: sortField === 'end_date' ? "#1d4ed8" : "#475569",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
-              boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
-            }}
-          >
-            END DATE {sortField === 'end_date' && (sortOrder === 'asc' ? '▲' : '▼')}
-          </button>
           <button 
             onClick={() => handleSort('project_code')}
             style={{ 
@@ -565,6 +605,38 @@ function ProjectUpdateComponent(props) {
           >
             PROJECT NAME {sortField === 'project_name' && (sortOrder === 'asc' ? '▲' : '▼')}
           </button>
+
+          {!isCompact && (
+            <>
+              <button 
+                onClick={() => handleSort('start_date')}
+                style={{ 
+                  padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+                  border: sortField === 'start_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+                  background: sortField === 'start_date' ? "#eff6ff" : "#ffffff",
+                  color: sortField === 'start_date' ? "#1d4ed8" : "#475569",
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+                  boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+                }}
+              >
+                START DATE {sortField === 'start_date' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </button>
+
+              <button 
+                onClick={() => handleSort('end_date')}
+                style={{ 
+                  padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700", 
+                  border: sortField === 'end_date' ? "1px solid #3b82f6" : "1px solid #cbd5e1", 
+                  background: sortField === 'end_date' ? "#eff6ff" : "#ffffff",
+                  color: sortField === 'end_date' ? "#1d4ed8" : "#475569",
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+                  boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)", textTransform: "uppercase"
+                }}
+              >
+                END DATE {sortField === 'end_date' && (sortOrder === 'asc' ? '▲' : '▼')}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Data Table — Two-line row layout matching screenshot */}
@@ -584,7 +656,7 @@ function ProjectUpdateComponent(props) {
                     START DATE / END DATE
                   </th>
                   <th className="th-status">
-                    STATUS / PRIORITY { !isCompact && "/ PHASE" }
+                    STATUS / PRIORITY
                   </th>
                   {!isCompact && (
                     <>
@@ -592,7 +664,7 @@ function ProjectUpdateComponent(props) {
                         <span className="process-header">PROJECT PROCESS</span>
                       </th>
                       <th className="th-estimate">
-                        <span className="process-header">ESTIMATE DAYS</span>
+                        <span className="process-header">TIME ANALYSIS<br/>DAYS</span>
                       </th>
                     </>
                   )}
@@ -672,22 +744,33 @@ function ProjectUpdateComponent(props) {
                             <option value="">Unassigned</option>
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
-                          {!isCompact && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
-                              <div className="pu-date-input-wrap">
-                                <input type="date" value={project.start_date || ""}
-                                  onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                                  className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
-                                  disabled={readOnly} />
-                              </div>
-                              <div className="pu-date-input-wrap">
-                                <input type="date" value={project.end_date || ""}
-                                  onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                                  className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
-                                  disabled={readOnly} />
-                              </div>
-                            </div>
-                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
+                            {isCompact ? (
+                              <>
+                                <div className="pu-compact-date" style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                  <span className="pu-compact-date-label" style={{ fontWeight: "700" }}>S:</span> {project.start_date || "—"}
+                                </div>
+                                <div className="pu-compact-date" style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                  <span className="pu-compact-date-label" style={{ fontWeight: "700" }}>E:</span> {project.end_date || "—"}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="pu-date-input-wrap">
+                                  <input type="date" value={project.start_date || ""}
+                                    onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
+                                    className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
+                                    disabled={readOnly} />
+                                </div>
+                                <div className="pu-date-input-wrap">
+                                  <input type="date" value={project.end_date || ""}
+                                    onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
+                                    className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
+                                    disabled={readOnly} />
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </td>
 
                         {/* Status Column Group */}
@@ -699,14 +782,6 @@ function ProjectUpdateComponent(props) {
                             {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                           </select>
                           <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
-                            {!isCompact && (
-                              <select value={project.phase || "Analysis"}
-                                onChange={(e) => handleUpdate(project.project_code, "phase", e.target.value)}
-                                className={cellSelectClass(project.project_code, "phase", project.phase || "Analysis", "phase-select-small")}
-                                disabled={readOnly}>
-                                {phaseOptions.map((ph) => <option key={ph} value={ph}>{ph}</option>)}
-                              </select>
-                            )}
                             <input type="text" value={project.priority || ""}
                               onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
                               className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
@@ -757,7 +832,7 @@ function ProjectUpdateComponent(props) {
 
                             <td className="td-estimate">
                               <div className="pu-estimate-wrap">
-                                <span className="pu-estimate-label">DAYS</span>
+                                <span className="pu-estimate-label">EST</span>
                                 <input
                                   type="number"
                                   value={(() => {
@@ -770,6 +845,23 @@ function ProjectUpdateComponent(props) {
                                   onChange={(e) => handleUpdate(project.project_code, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
                                   className={cellInputClass(project.project_code, "estimated_days", project.estimated_days, "estimate-input")}
                                   disabled={readOnly}
+                                />
+                                <span className="pu-estimate-label" style={{ marginTop: "0.4rem" }}>ACTUAL</span>
+                                <input
+                                  type="number"
+                                  value={(() => {
+                                    const val = project.actual_days;
+                                    if (val === null || val === undefined || val === "") return "";
+                                    const num = parseFloat(val);
+                                    if (isNaN(num)) return "";
+                                    // Rounding: >=0.5 fraction → ceil, <0.5 → floor
+                                    const frac = num - Math.floor(num);
+                                    return frac >= 0.5 ? Math.ceil(num) : Math.floor(num);
+                                  })()}
+                                  className="pu-cell-input estimate-input"
+                                  disabled={true}
+                                  readOnly
+                                  style={{ backgroundColor: "#f8fafc", color: "#64748b", cursor: "not-allowed" }}
                                 />
                               </div>
                             </td>
@@ -800,6 +892,8 @@ function ProjectUpdateComponent(props) {
             </table>
           </div>
         </div>
+
+
 
       </div>
     </div>

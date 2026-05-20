@@ -7,15 +7,26 @@ print(f"DEBUG: Loading queries.py from {__file__}")
 def get_all_employees(exclude_admin=False):
     """Fetch all employees using Supabase SDK."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['employee_id', 'employee_name', 'slack_id'])
+    if not supabase: return pd.DataFrame(columns=['employee_id', 'employee_name', 'slack_id', 'email'])
     
-    query = supabase.table('employee').select('employee_id, employee_name, slack_id')
-    if exclude_admin:
-        query = query.neq('employee_id', 'admin')
-    
-    res = query.order('employee_name').execute()
-    data = res.data or []
-    return pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id'])
+    # Try fetching with email column
+    try:
+        query = supabase.table('employee').select('employee_id, employee_name, slack_id, email')
+        if exclude_admin:
+            query = query.neq('employee_id', 'admin')
+        res = query.order('employee_name').execute()
+        data = res.data or []
+        return pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id', 'email'])
+    except Exception:
+        # Fallback if email column isn't accessible
+        query = supabase.table('employee').select('employee_id, employee_name, slack_id')
+        if exclude_admin:
+            query = query.neq('employee_id', 'admin')
+        res = query.order('employee_name').execute()
+        data = res.data or []
+        df = pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id'])
+        df['email'] = None
+        return df
 
 def get_all_projects():
     """Fetch all projects using Supabase SDK."""
@@ -69,7 +80,7 @@ def get_all_users():
     
     try:
         # Try fetching with the new column
-        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access)').order('username').execute()
+        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access, email)').order('username').execute()
     except Exception:
         # Fallback if column doesn't exist yet
         res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id)').order('username').execute()
@@ -85,10 +96,11 @@ def get_all_users():
             emp.get('slack_id'),
             r['password'],
             emp.get('project_update_access', False), # Defaults to False if missing
-            r['employee_id']
+            r['employee_id'],
+            emp.get('email')
         ])
     
-    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id'])
+    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email'])
 
 def get_employee_by_id(emp_id):
     """Fetch single employee details using Supabase SDK."""
@@ -345,16 +357,50 @@ def import_employees(df):
         emp_data = []
         user_data = []
         
+        # Normalize and validate required columns case-insensitively
+        col_map = {str(c).strip().lower(): c for c in df.columns}
+        required = ['a__serial', 'name', 'slack id', 'email']
+        for r in required:
+            if r not in col_map:
+                disp_names = {
+                    'a__serial': 'a__Serial',
+                    'name': 'Name',
+                    'slack id': 'Slack ID',
+                    'email': 'Email'
+                }
+                return False, f"Missing required column: '{disp_names[r]}'"
+                
         for _, row in df.iterrows():
-            emp_id = str(row.get('a__Serial', ''))
-            emp_name = row.get('Name', '')
-            slack_id = row.get('Slack ID', '')
-            if not emp_id or not emp_name: continue
+            emp_id_val = row[col_map['a__serial']]
+            if pd.isna(emp_id_val) or str(emp_id_val).strip() == "":
+                continue
+            emp_id = str(emp_id_val).strip()
+            
+            emp_name = row[col_map['name']]
+            emp_name = str(emp_name).strip() if not pd.isna(emp_name) else ""
+            if not emp_name:
+                return False, f"Employee ID {emp_id} is missing 'Name'."
+                
+            slack_id = row[col_map['slack id']]
+            slack_id = str(slack_id).strip() if not pd.isna(slack_id) else ""
+            if not slack_id:
+                return False, f"Employee {emp_name} (ID {emp_id}) is missing 'Slack ID'."
+                
+            email = row[col_map['email']]
+            email = str(email).strip() if not pd.isna(email) else ""
+            if not email:
+                return False, f"Employee {emp_name} (ID {emp_id}) is missing 'Email'."
+            
+            # Simple format validation
+            import re
+            if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+                return False, f"Invalid email format for employee {emp_name}: {email}"
             
             emp_data.append(_sanitize_dict({
                 "employee_id": emp_id,
                 "employee_name": emp_name,
-                "slack_id": slack_id
+                "slack_id": slack_id,
+                "email": email
             }))
             
             username = " ".join(emp_name.strip().lower().split())
@@ -365,7 +411,25 @@ def import_employees(df):
                 "password": enc_pwd
             }))
             
+        # Validate uniqueness of emails in this batch and against DB
         if emp_data:
+            emails_in_batch = {}
+            for e in emp_data:
+                em = e.get('email')
+                if em:
+                    if em in emails_in_batch and emails_in_batch[em] != e['employee_id']:
+                        return False, f"Duplicate email {em} found in import file."
+                    emails_in_batch[em] = e['employee_id']
+                    
+            if emails_in_batch:
+                # Check DB for these emails
+                res = supabase.table('employee').select('employee_id, email').in_('email', list(emails_in_batch.keys())).execute()
+                if res.data:
+                    for r in res.data:
+                        # If email belongs to a different employee, it's a conflict
+                        if str(r['employee_id']) != str(emails_in_batch[r['email']]):
+                            return False, f"Email {r['email']} is already assigned to a different employee in the system."
+                            
             supabase.table('employee').upsert(emp_data).execute()
         if user_data:
             supabase.table('users').upsert(user_data, on_conflict='employee_id').execute()
@@ -508,6 +572,7 @@ def import_project_updates(df):
             'prototype_link': ['Prototype', 'Prototype Link', 'Prototype_Link'],
             'slack_link': ['Slack', 'Slack Link', 'Slack URL', 'Slack_Link'],
             'estimated_days': ['Estimated Days', 'Estimate Days', 'Days'],
+            'actual_days': ['Actual Days', 'Actual_Days', 'ActualDays'],
             'checkbox_bc': ['CheckBoxe BC', 'CheckBoxe_BC', 'BRD'],
             'checkbox_trello': ['CheckBoxe Trello', 'CheckBoxe_Trello', 'Trello Check'],
             'checkbox_wa': ['CheckBoxe WA', 'CheckBoxe_WA', 'WA'],
@@ -554,6 +619,7 @@ def import_project_updates(df):
             ('prototype_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
             ('slack_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
             ('estimated_days', _parse_int_value, None),
+            ('actual_days', lambda x: round(float(x)) if x is not None and pd.notna(x) and str(x).strip() not in ('', 'nan', 'none') else None, None),
             ('checkbox_bc', _parse_checkbox_value, None),
             ('checkbox_trello', _parse_checkbox_value, None),
             ('checkbox_wa', _parse_checkbox_value, None),
@@ -727,3 +793,103 @@ def init_db():
         return True, "Database references initialized (System Admin created)"
     except Exception as e:
         return False, str(e)
+
+def add_employee(emp_id, emp_name, slack_id, email=None):
+    """Add a new employee and their user account."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    # Check unique email
+    if email and str(email).strip():
+        res = supabase.table('employee').select('employee_id').eq('email', email).execute()
+        if res.data: return False, "Email already exists"
+        
+    try:
+        from services.auth_service import FIXED_PASSWORD, encrypt_data
+        
+        supabase.table('employee').insert({
+            "employee_id": emp_id,
+            "employee_name": emp_name,
+            "slack_id": slack_id,
+            "email": email if str(email).strip() else None
+        }).execute()
+        
+        username = " ".join(emp_name.strip().lower().split())
+        enc_pwd = encrypt_data(FIXED_PASSWORD)
+        supabase.table('users').insert({
+            "employee_id": emp_id,
+            "username": username,
+            "password": enc_pwd
+        }).execute()
+        
+        return True, "Employee created successfully"
+    except Exception as e:
+        return False, str(e)
+
+def update_employee(emp_id, emp_name, slack_id, email=None):
+    """Update an existing employee."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    # Check unique email
+    if email and str(email).strip():
+        res = supabase.table('employee').select('employee_id').eq('email', email).neq('employee_id', emp_id).execute()
+        if res.data: return False, "Email already exists"
+        
+    try:
+        supabase.table('employee').update({
+            "employee_name": emp_name,
+            "slack_id": slack_id,
+            "email": email if str(email).strip() else None
+        }).eq('employee_id', emp_id).execute()
+        
+        return True, "Employee updated successfully"
+    except Exception as e:
+        return False, str(e)
+
+def create_reminder_log(employee_id, recipient_email, project_ids, email_subject, email_body):
+    """Insert initial pending log record for a project update reminder."""
+    supabase = get_supabase_client()
+    if not supabase: return None
+    
+    try:
+        try:
+            emp_id_int = int(employee_id)
+        except ValueError:
+            emp_id_int = 0
+            
+        data = {
+            "employee_id": emp_id_int,
+            "recipient_email": recipient_email,
+            "project_ids": project_ids,
+            "email_subject": email_subject,
+            "email_body": email_body,
+            "status": 0
+        }
+        res = supabase.table('project_update_reminder_logs').insert(data).execute()
+        if res.data:
+            return res.data[0].get('id')
+    except Exception as e:
+        print("Error creating reminder log:", e)
+    return None
+
+def update_reminder_log(log_id, status, error_message=None):
+    """Update status, error message, and sent_at for reminder log."""
+    supabase = get_supabase_client()
+    if not supabase or log_id is None: return False
+    
+    import datetime
+    try:
+        data = {
+            "status": status,
+            "error_message": error_message
+        }
+        if status == 1:
+            data["sent_at"] = datetime.datetime.now().isoformat()
+            
+        supabase.table('project_update_reminder_logs').update(data).eq('id', log_id).execute()
+        return True
+    except Exception as e:
+        print("Error updating reminder log:", e)
+    return False
+

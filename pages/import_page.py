@@ -35,9 +35,9 @@ def render_import_page():
                 success, msg = import_employees(df)
                 st.success(msg) if success else st.error(msg)
         
-        sample_emp = pd.DataFrame([["101", "John Doe", "U12345"]], columns=['a__Serial', 'Name', 'Slack ID'])
+        sample_emp = pd.DataFrame([["101", "John Doe", "U12345", "john.doe@example.com"]], columns=['a__Serial', 'Name', 'Slack ID', 'Email'])
         st.download_button("📥 Sample Employee Excel", get_excel_download(sample_emp), "sample_employees.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'a__Serial', 'Name', 'Slack ID'.")
+        st.info("Required: 'a__Serial', 'Name', 'Slack ID', 'Email'.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_proj:
@@ -86,14 +86,15 @@ def render_import_page():
         
         sample_update_proj = pd.DataFrame(
             [[
-                "852", "1", "St Paul’s College Trip Payment", "Not started", "Kritika Wadhwa", 
+                "852", "1", "St Paul's College Trip Payment", "Not started", "Kritika Wadhwa", 
                 "https://trello.com/...", "https://slack.com/...", "https://figma.com/...", 
-                "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1"
+                "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1", "166", "117"
             ]],
             columns=[
                 'Job No', 'Job Priority', 'Priority', 'Search_Project', 'Lead engineer', 
                 'Trello', 'Slack', 'Prototype', 'Date Start', 'Date Finish', 'Current Phase_g',
-                'CheckBoxe BC', 'CheckBoxe Trello', 'CheckBoxe WA', 'CheckBoxe WS'
+                'CheckBoxe BC', 'CheckBoxe Trello', 'CheckBoxe WA', 'CheckBoxe WS',
+                'Estimated Days', 'Actual Days'
             ]
         )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
