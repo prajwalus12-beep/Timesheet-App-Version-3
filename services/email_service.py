@@ -173,7 +173,11 @@ def send_reminder_email(employee_id, recipient_email, employee_name, projects):
         )
         msg.attach(part)
     except Exception as pdf_err:
-        print("Failed to generate/attach PDF:", pdf_err)
+        import traceback
+        error_details = traceback.format_exc()
+        print("Failed to generate/attach PDF:", error_details)
+        return False, f"Failed to generate/attach PDF: {pdf_err}. Details: {error_details}"
+
 
     try:
         if smtp_encryption in ("ssl", "ssl/tls"):
