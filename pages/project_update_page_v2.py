@@ -315,11 +315,12 @@ def reminder_dialog(all_emps, df, displayed_project_codes):
                             except:
                                 pass
                                 
-                        if end and not pd.isna(end):
+                        validate_past_date_statuses = ["Not started", "Ongoing", "In testing", "Awaiting Info", "At Beta", "In progress"]
+                        if status in validate_past_date_statuses and end and not pd.isna(end):
                             try:
                                 e_dt = pd.to_datetime(end).date()
                                 if e_dt < datetime.date.today():
-                                    issues.append("End Date is in the past")
+                                    issues.append("Past date is not allowed.")
                             except:
                                 pass
                                 

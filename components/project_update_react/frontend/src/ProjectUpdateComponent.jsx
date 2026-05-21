@@ -233,11 +233,12 @@ function ProjectUpdateComponent(props) {
         if (p.start_date && p.end_date && new Date(p.start_date) > new Date(p.end_date)) {
           errs.push("Start Date to be <= End Date");
         }
-        if (p.end_date) {
+        const validatePastDateStatuses = ["Not started", "Ongoing", "In testing", "Awaiting Info", "At Beta", "In progress"];
+        if (validatePastDateStatuses.includes(p.status) && p.end_date) {
           const today = new Date();
           today.setHours(0,0,0,0);
           if (new Date(p.end_date) < today) {
-            errs.push("End Date is in the past");
+            errs.push("Past date is not allowed.");
           }
         }
         if (!p.trello_link) errs.push("Missing Trello link");
