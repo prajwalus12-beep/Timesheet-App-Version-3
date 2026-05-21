@@ -647,12 +647,16 @@ function ProjectUpdateComponent(props) {
                   <th className="th-hash">#</th>
                   <th className="th-code">CODE</th>
                   <th className="th-project">
-                    PROJECT NAME / TRELLO URL /<br />
-                    PROTOTYPE URL / SLACK URL
+                    PROJECT NAME / TRELLO URL
+                    {!isCompact && (
+                      <> /<br />PROTOTYPE URL / SLACK URL</>
+                    )}
                   </th>
                   <th className="th-lead">
-                    LEAD ENGINEER /<br />
-                    START DATE / END DATE
+                    LEAD ENGINEER
+                    {!isCompact && (
+                      <> /<br />START DATE / END DATE</>
+                    )}
                   </th>
                   <th className="th-status">
                     STATUS / PRIORITY
@@ -743,33 +747,22 @@ function ProjectUpdateComponent(props) {
                             <option value="">Unassigned</option>
                             {leadEngineers.map((eng) => <option key={eng} value={eng}>{eng}</option>)}
                           </select>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
-                            {isCompact ? (
-                              <>
-                                <div className="pu-compact-date" style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                  <span className="pu-compact-date-label" style={{ fontWeight: "700" }}>S:</span> {project.start_date || "—"}
-                                </div>
-                                <div className="pu-compact-date" style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                  <span className="pu-compact-date-label" style={{ fontWeight: "700" }}>E:</span> {project.end_date || "—"}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="pu-date-input-wrap">
-                                  <input type="date" value={project.start_date || ""}
-                                    onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
-                                    className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
-                                    disabled={readOnly} />
-                                </div>
-                                <div className="pu-date-input-wrap">
-                                  <input type="date" value={project.end_date || ""}
-                                    onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
-                                    className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
-                                    disabled={readOnly} />
-                                </div>
-                              </>
-                            )}
-                          </div>
+                          {!isCompact && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
+                              <div className="pu-date-input-wrap">
+                                <input type="date" value={project.start_date || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "start_date", e.target.value)}
+                                  className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
+                                  disabled={readOnly} />
+                              </div>
+                              <div className="pu-date-input-wrap">
+                                <input type="date" value={project.end_date || ""}
+                                  onChange={(e) => handleUpdate(project.project_code, "end_date", e.target.value)}
+                                  className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
+                                  disabled={readOnly} />
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         {/* Status Column Group */}
