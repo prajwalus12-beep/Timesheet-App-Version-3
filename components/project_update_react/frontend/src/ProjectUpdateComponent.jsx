@@ -71,6 +71,13 @@ function ProjectUpdateComponent(props) {
   // Adjust iframe height after each render
   useEffect(() => { Streamlit.setFrameHeight(); });
 
+  // Map for fast lookup of original server state
+  const serverProjectsMap = useMemo(() => {
+    const map = new Map();
+    serverProjects.forEach(p => map.set(p.project_code, p));
+    return map;
+  }, [serverProjects]);
+
   // ---- Filtering ----
   const updatedFlagKeys = [
     "project_name_updated", "lead_engineer_updated", "priority_updated",
@@ -101,9 +108,15 @@ function ProjectUpdateComponent(props) {
           return false;
         }
       }
-      if (filterStatus.length > 0 && !filterStatus.includes(p.status)) return false;
 
-      const isComplete = p.status === "Complete";
+      // Use the original server status for "Complete" and Status filter logic
+      // This prevents items from jumping views before being saved.
+      const server = serverProjectsMap.get(p.project_code);
+      const originalStatus = server ? server.status : p.status;
+
+      if (filterStatus.length > 0 && !filterStatus.includes(originalStatus)) return false;
+
+      const isComplete = originalStatus === "Complete";
       const hasUpdate = updatedFlagKeys.some(
         (k) => p[k] === true || p[k] === "true" || p[k] === "True"
       );
@@ -121,7 +134,7 @@ function ProjectUpdateComponent(props) {
 
       return true;
     });
-  }, [projects, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted]);
+  }, [projects, serverProjectsMap, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
   const sortedProjects = useMemo(() => {
     return [...filteredProjects].sort((a, b) => {
