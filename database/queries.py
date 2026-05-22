@@ -322,6 +322,36 @@ def import_projects(df):
         existing_res = supabase.table('project').select('project_code').execute()
         existing_codes = {r['project_code'] for r in (existing_res.data or [])}
         
+        # Fetch all employees from database to build ID-to-Name mapping
+        emp_res = supabase.table('employee').select('employee_id, employee_name').execute()
+        emp_data = emp_res.data or []
+        
+        id_to_name = {}
+        name_to_name = {}
+        for emp in emp_data:
+            eid = emp.get('employee_id')
+            ename = emp.get('employee_name')
+            if eid and ename:
+                id_to_name[_normalize_code(eid).strip().lower()] = ename
+            if ename:
+                name_to_name[ename.strip().lower()] = ename
+
+        def _parse_lead_engineer(val):
+            if pd.isna(val) or val is None:
+                return ""
+            s_val = str(val).strip()
+            if s_val.lower() in ('nan', 'none', 'nat', ''):
+                return ""
+            norm_val = _normalize_code(s_val).strip().lower()
+            if norm_val in id_to_name:
+                return id_to_name[norm_val]
+            if norm_val in name_to_name:
+                return name_to_name[norm_val]
+            lower_val = s_val.lower()
+            if lower_val in name_to_name:
+                return name_to_name[lower_val]
+            return s_val
+        
         data = []
         updated_count = 0
         new_count = 0
@@ -332,7 +362,7 @@ def import_projects(df):
                 "project_name": encrypt_data(str(row.get('Project', ''))),
                 "status": row.get('Status', 'In progress'),
                 "priority": row.get('Job Priority'),
-                "lead_engineer": row.get('Lead engineer'),
+                "lead_engineer": _parse_lead_engineer(row.get('Lead engineer')),
                 "trello_link": row.get('Trello')
             }
             data.append(_sanitize_dict(record))
@@ -502,13 +532,18 @@ def _parse_date_value(val):
 
 
 def _parse_checkbox_value(val):
-    """Convert Excel checkbox values (1, TRUE, '1', 'x') to 1 or None."""
+    """Convert Excel checkbox values to DB representation:
+    - Checked in Excel (1, TRUE, '1', 'x', 'yes', 'checked') maps to DB Checked: None
+    - Unchecked in Excel (blank/NaN, 0, FALSE) maps to DB Unchecked: 1
+    """
     if pd.isna(val):
-        return None
+        return 1  # Blank in Excel -> Unchecked (1)
     s = str(val).strip().lower()
     if s in ('1', '1.0', 'true', 'x', 'yes', 'checked'):
-        return 1
-    return None
+        return None  # Checked in Excel -> Checked (None)
+    if s in ('0', '0.0', 'false', 'no', 'unchecked', ''):
+        return 1  # Unchecked in Excel -> Unchecked (1)
+    return 1  # Default to Unchecked
 
 def _parse_int_value(val):
     """Safely convert Excel numeric values to int or None."""
@@ -529,6 +564,36 @@ def import_project_updates(df):
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
+    # Fetch all employees from database to build ID-to-Name mapping
+    emp_res = supabase.table('employee').select('employee_id, employee_name').execute()
+    emp_data = emp_res.data or []
+    
+    id_to_name = {}
+    name_to_name = {}
+    for emp in emp_data:
+        eid = emp.get('employee_id')
+        ename = emp.get('employee_name')
+        if eid and ename:
+            id_to_name[_normalize_code(eid).strip().lower()] = ename
+        if ename:
+            name_to_name[ename.strip().lower()] = ename
+
+    def _parse_lead_engineer(val):
+        if pd.isna(val) or val is None:
+            return ""
+        s_val = str(val).strip()
+        if s_val.lower() in ('nan', 'none', 'nat', ''):
+            return ""
+        norm_val = _normalize_code(s_val).strip().lower()
+        if norm_val in id_to_name:
+            return id_to_name[norm_val]
+        if norm_val in name_to_name:
+            return name_to_name[norm_val]
+        lower_val = s_val.lower()
+        if lower_val in name_to_name:
+            return name_to_name[lower_val]
+        return s_val
+
     def _normalize_for_cmp(v):
         if v is None: return None
         try:
@@ -611,7 +676,7 @@ def import_project_updates(df):
             ('project_name', lambda x: str(x).strip() if pd.notna(x) else "", ""),
             ('priority', _parse_priority, None),
             ('status', lambda x: str(x).strip() if pd.notna(x) else 'In progress', 'In progress'),
-            ('lead_engineer', lambda x: str(x).strip() if pd.notna(x) else "", ""),
+            ('lead_engineer', _parse_lead_engineer, ""),
             ('trello_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
             ('start_date', _parse_date_value, None),
             ('end_date', _parse_date_value, None),
@@ -652,6 +717,7 @@ def import_project_updates(df):
             
             if code in existing_map:
                 existing = existing_map[code]
+                record["id"] = existing["id"]
                 row_changed = False
                 row_preserved = False
                 
@@ -713,8 +779,7 @@ def import_project_updates(df):
         if to_insert:
             supabase.table('project_reports').insert(to_insert).execute()
         if to_update:
-            for u in to_update:
-                supabase.table('project_reports').update(u).eq('project_code', u['project_code']).execute()
+            supabase.table('project_reports').upsert(to_update).execute()
              
         msg = f"Import complete: {new_count} new projects added."
         if updated_count: msg += f" {updated_count} projects updated."
