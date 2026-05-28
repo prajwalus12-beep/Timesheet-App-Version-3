@@ -300,6 +300,7 @@ def reminder_dialog(all_emps, df, displayed_project_codes):
                         issues = []
                         start = proj_row.get('start_date')
                         end = proj_row.get('end_date')
+                        status = proj_row.get('status')
                         
                         if not start or pd.isna(start):
                             issues.append("Missing Start Date")
@@ -334,7 +335,6 @@ def reminder_dialog(all_emps, df, displayed_project_codes):
                             issues.append("Missing estimates")
                             
                         actual = proj_row.get('actual_days')
-                        status = proj_row.get('status')
                         try:
                             actual_val = float(actual) if actual is not None and not pd.isna(actual) else 0.0
                             if actual_val > 1.0 and status == "Not started":
