@@ -114,24 +114,24 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
             return name_to_id.get(s, v)
         clean_df['lead_engineer'] = clean_df['lead_engineer'].apply(_map_lead_engineer)
 
-    # ── Standardise Date Formats to dd/mm/yyyy ───────────────────────────────
-    def _format_date_to_ddmmyyyy(v):
+    # ── Standardise Date Formats to dd/mm/yy ─────────────────────────────────
+    def _format_date_to_ddmmyy(v):
         if pd.isna(v) or not v or str(v).strip().lower() in ('nan', 'none', 'nat', ''):
             return ''
         try:
             if hasattr(v, 'strftime'):
-                return v.strftime('%d/%m/%Y')
+                return v.strftime('%d/%m/%y')
             dt = pd.to_datetime(v)
             if pd.notna(dt):
-                return dt.strftime('%d/%m/%Y')
+                return dt.strftime('%d/%m/%y')
         except Exception:
             pass
         return str(v)
 
     if 'start_date' in clean_df.columns:
-        clean_df['start_date'] = clean_df['start_date'].apply(_format_date_to_ddmmyyyy)
+        clean_df['start_date'] = clean_df['start_date'].apply(_format_date_to_ddmmyy)
     if 'end_date' in clean_df.columns:
-        clean_df['end_date'] = clean_df['end_date'].apply(_format_date_to_ddmmyyyy)
+        clean_df['end_date'] = clean_df['end_date'].apply(_format_date_to_ddmmyy)
 
     # ── Convert Job No and Lead Engineer to numeric where possible ───────────
     def _to_numeric_where_possible(v):
