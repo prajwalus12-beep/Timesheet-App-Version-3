@@ -511,6 +511,16 @@ def _parse_date_value(val):
             return None
     except (TypeError, ValueError):
         pass
+
+    # Check if the value is an Excel serial number (numeric or string representation of numeric)
+    # Excel date serial numbers are usually between 10000 (1927) and 99999 (2173)
+    try:
+        f_val = float(val)
+        if 10000 <= f_val <= 99999:
+            return pd.to_datetime(f_val, unit='D', origin='1899-12-30').date().isoformat()
+    except (ValueError, TypeError):
+        pass
+
     # pandas Timestamp or datetime.datetime / datetime.date
     if hasattr(val, 'date'):
         try:
@@ -525,7 +535,15 @@ def _parse_date_value(val):
         return None
     # Try to parse a string date so it is normalised to YYYY-MM-DD
     try:
-        # Use dayfirst=True and mixed format for robust parsing
+        # If it starts with a 4-digit year, parse it year-first (to avoid dayfirst swapped month/day)
+        s_clean = s.replace('/', '-').replace(' ', '')
+        import re
+        if re.match(r'^\d{4}-\d{2}-\d{2}', s_clean):
+            try:
+                return pd.to_datetime(s_clean).date().isoformat()
+            except Exception:
+                pass
+        # Use dayfirst=True and mixed format for robust parsing for other cases (e.g. DD-MM-YYYY)
         return pd.to_datetime(s, format='mixed', dayfirst=True).date().isoformat()
     except Exception:
         return s  # return as-is if unparseable
