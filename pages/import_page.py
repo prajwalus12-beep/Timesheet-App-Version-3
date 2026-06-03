@@ -92,7 +92,7 @@ def render_import_page():
             ]],
             columns=[
                 'Job No', 'Job Priority', 'Priority', 'Search_Project', 'Lead engineer', 
-                'Trello', 'Slack', 'Prototype', 'Date Start', 'Date Finish', 'Current Phase_g',
+                'Trello', 'Slack', 'Prototype', 'Start Date', 'Finish Date', 'Current Phase_g',
                 'CheckBoxe BC', 'CheckBoxe Trello', 'CheckBoxe WA', 'CheckBoxe WS',
                 'Estimated Days', 'Actual Days'
             ]

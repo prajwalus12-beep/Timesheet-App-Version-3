@@ -614,14 +614,23 @@ def import_project_updates(df):
 
     def _normalize_for_cmp(v):
         if v is None: return None
+        # Handle pandas NaN / NaT
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
         try:
             # If it's a number, convert 9.0 -> 9
             f_v = float(v)
+            import math
+            if math.isnan(f_v):
+                return None
             if f_v == int(f_v): return str(int(f_v))
             return str(f_v)
         except (ValueError, TypeError):
             s = str(v).strip()
-            if s.lower() in ('nan', 'none', 'nat', ''):
+            if s.lower() in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', ''):
                 return None
             return s
 
@@ -650,7 +659,7 @@ def import_project_updates(df):
             'lead_engineer': ['Lead engineer', 'Lead Engineer', 'Lead'],
             'trello_link': ['Trello', 'Trello Link', 'Trello_Link'],
             'start_date': ['Start Date', 'Date Start', 'Date_Start', 'Start'],
-            'end_date': ['End Date', 'Date End', 'Finish Date', 'Date Finish', 'Finish', 'Date_Finish'],
+            'end_date': ['End Date', 'Date End', 'Finish Date', 'Date Finish', 'Finish', 'Date_Finish', 'End'],
             'phase': ['Phase', 'Project Phase', 'Current Phase_g'],
             'prototype_link': ['Prototype', 'Prototype Link', 'Prototype_Link'],
             'slack_link': ['Slack', 'Slack Link', 'Slack URL', 'Slack_Link'],
@@ -695,12 +704,12 @@ def import_project_updates(df):
             ('priority', _parse_priority, None),
             ('status', lambda x: str(x).strip() if pd.notna(x) else 'In progress', 'In progress'),
             ('lead_engineer', _parse_lead_engineer, ""),
-            ('trello_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
+            ('trello_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
             ('start_date', _parse_date_value, None),
             ('end_date', _parse_date_value, None),
             ('phase', lambda x: str(x).strip() if pd.notna(x) else 'Analysis', 'Analysis'),
-            ('prototype_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
-            ('slack_link', lambda x: str(x).strip() if pd.notna(x) else None, None),
+            ('prototype_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
+            ('slack_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
             ('estimated_days', _parse_int_value, None),
             ('actual_days', lambda x: round(float(x)) if x is not None and pd.notna(x) and str(x).strip() not in ('', 'nan', 'none') else None, None),
             ('checkbox_bc', _parse_checkbox_value, None),
