@@ -551,16 +551,16 @@ def _parse_date_value(val):
 
 def _parse_checkbox_value(val):
     """Convert Excel checkbox values to DB representation:
-    - Checked in Excel (1, TRUE, '1', 'x', 'yes', 'checked') maps to DB Checked: None
-    - Unchecked in Excel (blank/NaN, 0, FALSE) maps to DB Unchecked: 1
+    - Unchecked in Excel (1, TRUE, '1', 'x', 'yes', 'checked') maps to DB Unchecked: 1
+    - Checked in Excel (blank/NaN, 0, FALSE) maps to DB Checked: None
     """
     if pd.isna(val):
-        return 1  # Blank in Excel -> Unchecked (1)
+        return None  # Blank in Excel -> Checked (None)
     s = str(val).strip().lower()
     if s in ('1', '1.0', 'true', 'x', 'yes', 'checked'):
-        return None  # Checked in Excel -> Checked (None)
-    if s in ('0', '0.0', 'false', 'no', 'unchecked', ''):
         return 1  # Unchecked in Excel -> Unchecked (1)
+    if s in ('0', '0.0', 'false', 'no', 'unchecked', ''):
+        return None  # Checked in Excel -> Checked (None)
     return 1  # Default to Unchecked
 
 def _parse_int_value(val):
