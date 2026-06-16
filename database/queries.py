@@ -630,7 +630,7 @@ def import_project_updates(df):
             return str(f_v)
         except (ValueError, TypeError):
             s = str(v).strip()
-            if s.lower() in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', ''):
+            if s.lower() in ('nan', 'none', 'nat', ''):
                 return None
             return s
 
@@ -704,12 +704,12 @@ def import_project_updates(df):
             ('priority', _parse_priority, None),
             ('status', lambda x: str(x).strip() if pd.notna(x) else 'In progress', 'In progress'),
             ('lead_engineer', _parse_lead_engineer, ""),
-            ('trello_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
+            ('trello_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', '') else None, None),
             ('start_date', _parse_date_value, None),
             ('end_date', _parse_date_value, None),
             ('phase', lambda x: str(x).strip() if pd.notna(x) else 'Analysis', 'Analysis'),
-            ('prototype_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
-            ('slack_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', 'na', 'n/a', '#n/a', '') else None, None),
+            ('prototype_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', '') else None, None),
+            ('slack_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', '') else None, None),
             ('estimated_days', _parse_int_value, None),
             ('actual_days', lambda x: round(float(x)) if x is not None and pd.notna(x) and str(x).strip() not in ('', 'nan', 'none') else None, None),
             ('checkbox_bc', _parse_checkbox_value, None),

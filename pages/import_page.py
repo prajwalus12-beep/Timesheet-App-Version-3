@@ -11,14 +11,18 @@ def get_excel_download(df):
 
 def read_excel_or_csv(uploaded_file):
     """Read File depending on extension."""
+    na_vals = [
+        '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan',
+        '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null', ''
+    ]
     if uploaded_file.name.endswith('.csv'):
         try:
-            return pd.read_csv(uploaded_file)
+            return pd.read_csv(uploaded_file, keep_default_na=False, na_values=na_vals)
         except UnicodeDecodeError:
             uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, encoding='cp1252')
+            return pd.read_csv(uploaded_file, encoding='cp1252', keep_default_na=False, na_values=na_vals)
     else:
-        return pd.read_excel(uploaded_file)
+        return pd.read_excel(uploaded_file, keep_default_na=False, na_values=na_vals)
 
 def render_import_page():
     st.subheader("Import Data", divider="blue")
