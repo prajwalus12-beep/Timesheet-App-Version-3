@@ -191,10 +191,15 @@ def entry_form_dialog(user, emp_options, current_emp_id):
                 st.warning("Please enter valid hours.")
             elif entry_proj_key == "None":
                 st.error("⚠️ No project selected — pick one from the list above")
+            elif entry_proj_key not in all_proj_options:
+                # Key exists in session but doesn't match current filter (e.g. filter changed)
+                st.error("⚠️ Selected project is no longer in the current filter. Please re-select the project.")
+                st.session_state.pop('_entry_selected_proj_key', None)
+                st.stop()
             else:
                 proj_data = all_proj_options[entry_proj_key]
                 e_id = emp_options[entry_emp]
-                e_name = entry_emp.split(" (")[0] 
+                e_name = entry_emp.split(" (")[0]
                 add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
                 st.session_state.pop('_entry_selected_proj_key', None)
                 st.success("Entry Added!")
@@ -422,10 +427,15 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
                 st.warning("Please enter valid hours.")
             elif entry_proj_key == "None":
                 st.error("⚠️ No project selected")
+            elif entry_proj_key not in all_proj_options:
+                # Key exists in session but doesn't match current filter (e.g. filter changed)
+                st.error("⚠️ Selected project is no longer in the current filter. Please re-select the project.")
+                st.session_state.pop('_edit_selected_proj_key', None)
+                st.stop()
             else:
                 proj_data = all_proj_options[entry_proj_key]
                 e_id = emp_options[entry_emp]
-                e_name = entry_emp.split(" (")[0] 
+                e_name = entry_emp.split(" (")[0]
                 update_timesheet_entry(entry_data['id'], e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
                 st.session_state.pop('_edit_selected_proj_key', None)
                 st.success("Entry Updated!")

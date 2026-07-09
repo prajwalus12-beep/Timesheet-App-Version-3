@@ -71,7 +71,14 @@ def render_sidebar(user):
         opacity: 1;
         border-left: 3px solid #2563EB !important;
     }
-    /* Hide radio circle */
+    /* Hide radio circle - works across all Streamlit versions */
+    [data-testid="stSidebar"] .stRadio > div > label input[type="radio"] {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        position: absolute !important;
+    }
     [data-testid="stSidebar"] .stRadio > div > label > div:first-child {
         display: none !important;
     }
