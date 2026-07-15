@@ -240,10 +240,13 @@ def render_timesheet_page(user):
                         adjusted_width = (max_length + 2)
                     worksheet.column_dimensions[column].width = adjusted_width
             
+            export_dt = datetime.datetime.now()
+            file_name = f"TS_Exp_{export_dt.strftime('%Y%m%d')}_{export_dt.strftime('%H%M')}_Rng_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+            
             st.download_button(
                 label="📥 Export Excel", 
                 data=buffer.getvalue(), 
-                file_name=f"timesheet_export_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
+                file_name=file_name, 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
                 use_container_width=True,
                 type="primary"
