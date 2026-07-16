@@ -56,7 +56,7 @@ def entry_form_dialog(user, emp_options, current_emp_id):
         st.session_state._entry_proj_visible = 20
         st.session_state.pop('_entry_selected_proj_key', None)
 
-    filter_type = st.radio("Project Status", ["In-Progress", "Complete"], horizontal=True, key="entry_filter_type_modal", on_change=reset_visible)
+    filter_type = st.radio("Project Status", ["In-Progress", "Complete"], horizontal=True, key="entry_filter_type_modal", on_change=reset_visible, help="Select In-Progress to view active projects (In-testing, In Progress, Not Started, Awaiting Info, To Be Deployed). Select Complete to view completed projects only. The project list is synced with the latest status from the Project V1 page.")
     
     # Fetch and filter projects by status
     all_projects_df = get_all_projects()
