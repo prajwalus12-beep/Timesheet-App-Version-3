@@ -241,7 +241,7 @@ def render_timesheet_page(user):
                     worksheet.column_dimensions[column].width = adjusted_width
             
             export_dt = datetime.datetime.now()
-            file_name = f"TS_Exp_{export_dt.strftime('%Y%m%d')}_{export_dt.strftime('%H%M')}_Rng_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+            file_name = f"TS_Exp_{export_dt.strftime('%m%d')}_{export_dt.strftime('%H%M')}_Rng_{start_date.strftime('%m%d')}_{end_date.strftime('%m%d')}.xlsx"
             
             st.download_button(
                 label="📥 Export Excel", 
