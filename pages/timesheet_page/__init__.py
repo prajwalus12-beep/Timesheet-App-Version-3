@@ -206,6 +206,16 @@ def render_timesheet_page(user):
             # Select columns in requested order
             output_df = export_df[['Date', 'Emp_Code', 'Emp_Name', 'Project_Code', 'Project_Name', 'Status', 'Phases', 'Comment', 'Hours']]
             
+            # --- Sanitize blank cells: ensure they are truly empty (None) ---
+            # Strip whitespace from string columns; convert empty/whitespace-only strings to None
+            for col in output_df.columns:
+                if output_df[col].dtype == object:
+                    output_df[col] = output_df[col].apply(
+                        lambda x: x.strip() if isinstance(x, str) and x.strip() != '' else (None if isinstance(x, str) else x)
+                    )
+            # Replace any remaining NaN/NaT with None so openpyxl writes truly empty cells
+            output_df = output_df.where(output_df.notna(), other=None)
+            
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 output_df.to_excel(writer, index=False, sheet_name='Timesheets')
@@ -218,27 +228,40 @@ def render_timesheet_page(user):
                     if cell.border:
                         cell.border = openpyxl.styles.Border()
                 
+                # Determine data boundaries to avoid touching cells outside the data range
+                max_data_row = worksheet.max_row
+                max_data_col = worksheet.max_column
+                
                 # Auto-adjust column widths and wrap text for Comment
-                for col_idx, col in enumerate(worksheet.columns, 1):
+                for col_idx in range(1, max_data_col + 1):
                     max_length = 0
-                    column = col[0].column_letter # Get the column name
+                    column_letter = openpyxl.utils.get_column_letter(col_idx)
                     is_comment = False
-                    for cell in col:
-                        if cell.row == 1:
+                    for row_idx in range(1, max_data_row + 1):
+                        cell = worksheet.cell(row=row_idx, column=col_idx)
+                        if row_idx == 1:
                             if cell.value == 'Comment':
                                 is_comment = True
-                        if is_comment and cell.row > 1:
+                        # Only apply formatting to cells that have actual content
+                        if is_comment and row_idx > 1 and cell.value is not None:
                             cell.alignment = openpyxl.styles.Alignment(wrap_text=True)
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
+                        if cell.value is not None:
+                            cell_len = len(str(cell.value))
+                            if cell_len > max_length:
+                                max_length = cell_len
                     if is_comment:
                         adjusted_width = 40
                     else:
                         adjusted_width = (max_length + 2)
-                    worksheet.column_dimensions[column].width = adjusted_width
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+                
+                # Final pass: ensure any cell that should be blank is truly empty
+                # Clear out cells that have no value but may have residual formatting
+                for row in worksheet.iter_rows(min_row=2, max_row=max_data_row, max_col=max_data_col):
+                    for cell in row:
+                        if cell.value is None or (isinstance(cell.value, str) and cell.value.strip() == ''):
+                            cell.value = None
+                            cell._style = worksheet.cell(row=1, column=1)._style.__class__()
             
             export_dt = datetime.datetime.now()
             file_name = f"TS_Exp_{export_dt.strftime('%d%m')}_{export_dt.strftime('%H%M')}_Rng_{start_date.strftime('%d%m')}_{end_date.strftime('%d%m')}.xlsx"

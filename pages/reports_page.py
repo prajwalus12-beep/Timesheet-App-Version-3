@@ -212,8 +212,8 @@ def render_reports_page(user):
                     pivot_export = pivot_export.reset_index()
                     pivot_export.columns.name = None
                     
-                    # Fill NaN with empty space
-                    pivot_export = pivot_export.fillna('')
+                    # Replace NaN with None so blank cells are truly empty in Excel
+                    pivot_export = pivot_export.where(pivot_export.notna(), other=None)
                     
                     # Remove decimals if whole number
                     def _format_val(v):
