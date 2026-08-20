@@ -10,4 +10,5 @@ cryptography
 pillow
 supabase<=2.7.4
 openpyxl
-reportlab
+reportlab
+APScheduler>=3.10.0

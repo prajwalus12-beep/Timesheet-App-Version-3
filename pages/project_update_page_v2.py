@@ -464,6 +464,12 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
     action = result.get("action")
 
     if action == "save":
+        from database.queries import is_employee_active
+        is_admin = user.get("role") == "admin"
+        if not is_admin and not is_employee_active(user.get("employee_id")):
+            st.error("Employee is inactive. This action is not available for inactive employees.")
+            return
+            
         edits = result.get("edits", {})
         if edits:
             from database.connection import get_supabase_client
@@ -496,6 +502,12 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
         export_dialog(df)
 
     elif action == "open_reminder_modal":
+        from database.queries import is_employee_active
+        is_admin = user.get("role") == "admin"
+        if not is_admin and not is_employee_active(user.get("employee_id")):
+            st.error("Employee is inactive. This action is not available for inactive employees.")
+            return
+            
         payload = result.get("payload", {})
         displayed_project_codes = payload.get("displayedProjectCodes", [])
         reminder_dialog(all_emps, df, displayed_project_codes)
@@ -514,18 +526,24 @@ def render_project_update_page_v2(user):
     if "import_success_msg" in st.session_state:
         st.success(st.session_state.pop("import_success_msg"))
 
+    from database.queries import is_employee_active
     is_admin = user.get("role") == "admin"
     has_edit_access = user.get("project_update_access", False)
-    read_only = not (is_admin or has_edit_access)
+    is_active = is_employee_active(user.get("employee_id")) if not is_admin else True
+    
+    read_only = not (is_admin or (has_edit_access and is_active))
 
     # Weekly Lockout Logic
     lockout_schedule = get_lockout_schedule()
     current_day = datetime.datetime.now().strftime("%a").upper()
-    if not is_admin and lockout_schedule.get(current_day, False):
+    
+    if not is_active:
+        read_only = True
+        st.info("ℹ️ This employee is inactive. The information is available in read-only mode and actions are disabled.")
+    elif not is_admin and lockout_schedule.get(current_day, False):
         read_only = True
         st.error(f"🔒 **Updates are locked for today ({current_day}).** According to the Weekly Lockout Schedule, you cannot make changes today.")
-
-    if read_only and not (not is_admin and lockout_schedule.get(current_day, False)):
+    elif read_only:
         st.info("ℹ️ View-only mode. You do not have permission to edit project attributes.")
 
     # ── Fetch data (cached) ──────────────────────────────────────────────────

@@ -25,6 +25,11 @@ if "db_initialized" not in st.session_state:
     if success: st.session_state["db_initialized"] = True
     else: st.error(msg)
 
+if "scheduler_initialized" not in st.session_state:
+    from services.scheduler_service import initialize_scheduler
+    initialize_scheduler()
+    st.session_state["scheduler_initialized"] = True
+
 # 4. Authentication
 user = check_login()
 

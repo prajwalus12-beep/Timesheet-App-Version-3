@@ -3,15 +3,71 @@ import datetime
 import pandas as pd
 import io
 import openpyxl
-from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry, add_timesheet_entry
+from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry, add_timesheet_entry, is_employee_active
 from components.dialogs import entry_form_dialog, edit_form_dialog
 from utils.date_helpers import get_curr_cycle_dates
 
 def render_timesheet_page(user):
-    hdr_col, btn_col1, btn_col2 = st.columns([7, 1.5, 1.5])
+    is_admin = user.get("role") == "admin"
+
+    if is_admin:
+        hdr_col, chk_col, btn_reminder, btn_col2 = st.columns([4.0, 1.5, 2.0, 1.5])
+    else:
+        hdr_col, btn_col1, btn_col2 = st.columns([7, 1.5, 1.5])
+
     with hdr_col:
         st.subheader("Timesheet Entries", divider="blue")
         st.caption("Review and manage time logs")
+
+    if "reminder_success_msg" in st.session_state:
+        st.success(st.session_state.pop("reminder_success_msg"))
+    elif "reminder_warning_msg" in st.session_state:
+        st.warning(st.session_state.pop("reminder_warning_msg"))
+    elif "reminder_error_msg" in st.session_state:
+        st.error(st.session_state.pop("reminder_error_msg"))
+    elif "reminder_info_msg" in st.session_state:
+        st.info(st.session_state.pop("reminder_info_msg"))
+
+    # Admin-only: Send Timesheet Reminder button
+    if is_admin:
+        with chk_col:
+            st.write("")
+            st.write("")
+            force_resend = st.checkbox("Force resend", key="ts_reminder_force",
+                                       help="Override duplicate protection and resend reminders even if already sent this week.")
+        with btn_reminder:
+            st.write("")
+            if st.button("📧 Send Reminder", type="secondary", use_container_width=True,
+                         key="ts_send_reminder_btn"):
+                with st.spinner("Sending timesheet reminders..."):
+                    try:
+                        from services.timesheet_reminder_service import process_timesheet_reminders
+                        result = process_timesheet_reminders(
+                            reminder_type="manual",
+                            force_resend=force_resend
+                        )
+                        sent = result['sent']
+                        failed = result['failed']
+                        skipped = result['skipped']
+                        total = result['total']
+
+                        if total == 0:
+                            st.session_state["reminder_info_msg"] = "✅ No employees require a timesheet reminder."
+                        elif failed == 0 and skipped == 0:
+                            st.session_state["reminder_success_msg"] = f"✅ Reminder emails sent successfully to {sent} employee(s)."
+                        elif failed > 0 and sent > 0:
+                            st.session_state["reminder_warning_msg"] = f"⚠️ Reminder process completed. {sent} email(s) sent, {failed} failed{f', {skipped} skipped' if skipped else ''}."
+                        elif failed > 0 and sent == 0:
+                            st.session_state["reminder_error_msg"] = f"❌ All {failed} reminder email(s) failed to send."
+                        elif skipped > 0 and sent == 0:
+                            st.session_state["reminder_info_msg"] = f"ℹ️ {skipped} employee(s) already received reminders this week. Use 'Force resend' to override."
+                        else:
+                            st.session_state["reminder_success_msg"] = f"📧 {sent} sent, {failed} failed, {skipped} skipped."
+                        
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state["reminder_error_msg"] = f"❌ Reminder process error: {e}"
+                        st.rerun()
 
     emps = get_all_employees()
     current_emp_id = user.get("employee_id")
@@ -20,6 +76,11 @@ def render_timesheet_page(user):
     current_emp_name_label = next((k for k, v in emp_labels.items() if v == current_emp_id), "All")
     is_admin = user.get("role") == "admin"
     default_emp_filter = "All" if is_admin else current_emp_name_label
+    
+    current_emp_active = is_employee_active(current_emp_id) if current_emp_id and not is_admin else True
+    
+    if not current_emp_active:
+        st.info("ℹ️ This employee is inactive. The information is available in read-only mode and actions are disabled.")
 
     # Handle reset flag BEFORE widgets are instantiated
     if st.session_state.pop('_reset_filters', False):
@@ -171,10 +232,11 @@ def render_timesheet_page(user):
             sort_ascending.append(False)
             data = data.sort_values(by=sort_fields, ascending=sort_ascending)
 
-    with btn_col1:
-        st.write("")
-        if user["role"] != "admin":
-            if st.button("➕ Add Entry", type="primary", use_container_width=True):
+    # Only non-admins have the "Add Entry" button
+    if not is_admin:
+        with btn_col1:
+            st.write("")
+            if st.button("➕ Add Entry", type="primary", use_container_width=True, disabled=not current_emp_active):
                 entry_form_dialog(user, emp_labels, current_emp_id)
     
     with btn_col2:
@@ -539,12 +601,12 @@ def render_timesheet_page(user):
                 # Actions
                 if start_of_week <= r_date_val <= end_of_week:
                     act_edit, act_del, act_dup = st.columns([1, 1, 1], gap="small")
-                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Record"):
+                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Record", disabled=not current_emp_active):
                         edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
-                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Delete"):
+                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Delete", disabled=not current_emp_active):
                         delete_timesheet_entry(row['id'])
                         st.rerun()
-                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate"):
+                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate", disabled=not current_emp_active):
                         add_timesheet_entry(
                             row['emp_id'], row['emp_name'], row['project_code'], 
                             row['project_name'], row['date'], row['hours'], 

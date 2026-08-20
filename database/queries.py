@@ -7,18 +7,20 @@ print(f"DEBUG: Loading queries.py from {__file__}")
 def get_all_employees(exclude_admin=False):
     """Fetch all employees using Supabase SDK."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['employee_id', 'employee_name', 'slack_id', 'email'])
+    if not supabase: return pd.DataFrame(columns=['employee_id', 'employee_name', 'slack_id', 'email', 'status'])
     
-    # Try fetching with email column
+    # Try fetching with email and status columns
     try:
-        query = supabase.table('employee').select('employee_id, employee_name, slack_id, email')
+        query = supabase.table('employee').select('employee_id, employee_name, slack_id, email, status')
         if exclude_admin:
             query = query.neq('employee_id', 'admin')
         res = query.order('employee_name').execute()
         data = res.data or []
-        return pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id', 'email'])
+        df = pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id', 'email', 'status'])
+        df['status'] = df['status'].fillna(1).astype(int)
+        return df
     except Exception:
-        # Fallback if email column isn't accessible
+        # Fallback if email or status column isn't accessible
         query = supabase.table('employee').select('employee_id, employee_name, slack_id')
         if exclude_admin:
             query = query.neq('employee_id', 'admin')
@@ -26,7 +28,22 @@ def get_all_employees(exclude_admin=False):
         data = res.data or []
         df = pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id'])
         df['email'] = None
+        df['status'] = 1
         return df
+
+def is_employee_active(emp_id):
+    """Check if an employee is active (status = 1). Admins are assumed active."""
+    if not emp_id: return False
+    if str(emp_id).lower() == 'admin': return True
+    supabase = get_supabase_client()
+    if not supabase: return False
+    try:
+        res = supabase.table('employee').select('status').eq('employee_id', emp_id).execute()
+        if res.data:
+            return res.data[0].get('status', 1) == 1
+    except Exception:
+        pass
+    return False
 
 def get_all_projects():
     """Fetch all projects using Supabase SDK."""
@@ -76,13 +93,13 @@ def update_user_lockout(username, failed_attempts, locked_until=None):
 def get_all_users():
     """Fetch all users with their details using Supabase SDK join-like approach."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id'])
+    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status'])
     
     try:
-        # Try fetching with the new column
-        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access, email)').order('username').execute()
+        # Try fetching with the new columns
+        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access, email, status)').order('username').execute()
     except Exception:
-        # Fallback if column doesn't exist yet
+        # Fallback if columns don't exist yet
         res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id)').order('username').execute()
     
     data = res.data or []
@@ -97,10 +114,11 @@ def get_all_users():
             r['password'],
             emp.get('project_update_access', False), # Defaults to False if missing
             r['employee_id'],
-            emp.get('email')
+            emp.get('email'),
+            emp.get('status', 1)
         ])
     
-    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email'])
+    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status'])
 
 def get_employee_by_id(emp_id):
     """Fetch single employee details using Supabase SDK."""
@@ -112,6 +130,9 @@ def get_employee_by_id(emp_id):
 
 def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hours, phase, project_status="Not started", comment=""):
     """Insert a new timesheet entry using Supabase SDK."""
+    if not is_employee_active(emp_id):
+        return False, "Employee is inactive. This action is not available for inactive employees."
+        
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
@@ -178,6 +199,15 @@ def delete_timesheet_entry(entry_id):
     if not supabase: return False, "Configuration error"
     
     try:
+        res = supabase.table('timesheet').select('emp_id').eq('id', entry_id).execute()
+        if res.data:
+            emp_id = res.data[0].get('emp_id')
+            if not is_employee_active(emp_id):
+                return False, "Employee is inactive. This action is not available for inactive employees."
+    except Exception:
+        pass
+    
+    try:
         supabase.table('timesheet').delete().eq('id', entry_id).execute()
         return True, "Success"
     except Exception as e:
@@ -185,6 +215,9 @@ def delete_timesheet_entry(entry_id):
 
 def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_name, date, hours, phase, project_status, comment=""):
     """Update a timesheet entry using Supabase SDK."""
+    if not is_employee_active(emp_id):
+        return False, "Employee is inactive. This action is not available for inactive employees."
+        
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
@@ -817,8 +850,11 @@ def import_project_updates(df):
     except Exception as e:
         return False, str(e)
 
-def save_project_updates(edited_rows_dict, current_df):
+def save_project_updates(edited_rows_dict, current_df, user_emp_id=None):
     """Process st.data_editor changes and save to project_reports, updating flags."""
+    if user_emp_id and not is_employee_active(user_emp_id):
+        return False, "Employee is inactive. This action is not available for inactive employees."
+        
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
@@ -886,7 +922,7 @@ def init_db():
     except Exception as e:
         return False, str(e)
 
-def add_employee(emp_id, emp_name, slack_id, email=None):
+def add_employee(emp_id, emp_name, slack_id, email=None, status=1):
     """Add a new employee and their user account."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -903,7 +939,8 @@ def add_employee(emp_id, emp_name, slack_id, email=None):
             "employee_id": emp_id,
             "employee_name": emp_name,
             "slack_id": slack_id,
-            "email": email if str(email).strip() else None
+            "email": email if str(email).strip() else None,
+            "status": int(status)
         }).execute()
         
         username = " ".join(emp_name.strip().lower().split())
@@ -918,7 +955,7 @@ def add_employee(emp_id, emp_name, slack_id, email=None):
     except Exception as e:
         return False, str(e)
 
-def update_employee(emp_id, emp_name, slack_id, email=None):
+def update_employee(emp_id, emp_name, slack_id, email=None, status=1):
     """Update an existing employee."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -932,7 +969,8 @@ def update_employee(emp_id, emp_name, slack_id, email=None):
         supabase.table('employee').update({
             "employee_name": emp_name,
             "slack_id": slack_id,
-            "email": email if str(email).strip() else None
+            "email": email if str(email).strip() else None,
+            "status": int(status)
         }).eq('employee_id', emp_id).execute()
         
         return True, "Employee updated successfully"
@@ -985,3 +1023,147 @@ def update_reminder_log(log_id, status, error_message=None):
         print("Error updating reminder log:", e)
     return False
 
+# ============================================================
+# App Settings (key-value store in app_settings table)
+# ============================================================
+
+def get_app_setting(key, default=None):
+    """Fetch a single application setting by key."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return default
+    try:
+        res = supabase.table('app_settings').select('value').eq('key', key).execute()
+        if res.data:
+            return res.data[0]['value']
+    except Exception as e:
+        print(f"Error reading app setting '{key}': {e}")
+    return default
+
+def set_app_setting(key, value):
+    """Upsert an application setting."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+    try:
+        supabase.table('app_settings').upsert({
+            'key': key,
+            'value': str(value)
+        }, on_conflict='key').execute()
+        return True, "Success"
+    except Exception as e:
+        return False, str(e)
+
+# ============================================================
+# Timesheet Reminder Queries
+# ============================================================
+
+def get_active_employees_with_email():
+    """Fetch all non-admin employees who have a valid email address."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return []
+    try:
+        res = (supabase.table('employee')
+               .select('employee_id, employee_name, email')
+               .neq('employee_id', 'admin')
+               .not_.is_('email', 'null')
+               .eq('status', 1)
+               .order('employee_name')
+               .execute())
+        employees = []
+        for r in (res.data or []):
+            email = r.get('email', '')
+            if email and str(email).strip():
+                employees.append({
+                    'employee_id': r['employee_id'],
+                    'employee_name': r['employee_name'],
+                    'email': str(email).strip()
+                })
+        return employees
+    except Exception as e:
+        print(f"Error fetching active employees with email: {e}")
+        return []
+
+def get_timesheet_dates_for_employee(emp_id, start_date, end_date):
+    """Return the set of dates (as date objects) for which the employee has timesheet entries."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return set()
+    try:
+        res = (supabase.table('timesheet')
+               .select('date')
+               .eq('emp_id', emp_id)
+               .gte('date', start_date.isoformat())
+               .lte('date', end_date.isoformat())
+               .execute())
+        dates = set()
+        for r in (res.data or []):
+            d = r.get('date')
+            if d:
+                if isinstance(d, str):
+                    import datetime as _dt
+                    dates.add(_dt.date.fromisoformat(d))
+                else:
+                    dates.add(d)
+        return dates
+    except Exception as e:
+        print(f"Error fetching timesheet dates for {emp_id}: {e}")
+        return set()
+
+def create_ts_reminder_log(employee_id, employee_email, week_start_date,
+                           reminder_type, missing_days=None):
+    """Insert a pending timesheet reminder log record. Returns the log id or None."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    try:
+        import json as _json
+        data = {
+            'employee_id': str(employee_id),
+            'employee_email': employee_email,
+            'week_start_date': week_start_date.isoformat(),
+            'reminder_type': reminder_type,
+            'missing_days': _json.dumps([d.isoformat() for d in missing_days]) if missing_days else None,
+            'status': 0
+        }
+        res = supabase.table('timesheet_reminder_logs').insert(data).execute()
+        if res.data:
+            return res.data[0].get('id')
+    except Exception as e:
+        print(f"Error creating ts reminder log: {e}")
+    return None
+
+def update_ts_reminder_log(log_id, status, error_message=None):
+    """Update status and sent_at for a timesheet reminder log entry."""
+    supabase = get_supabase_client()
+    if not supabase or log_id is None:
+        return False
+    import datetime as _dt
+    try:
+        data = {'status': status, 'error_message': error_message}
+        if status == 1:
+            data['sent_at'] = _dt.datetime.now().isoformat()
+        supabase.table('timesheet_reminder_logs').update(data).eq('id', log_id).execute()
+        return True
+    except Exception as e:
+        print(f"Error updating ts reminder log {log_id}: {e}")
+    return False
+
+def check_ts_reminder_exists(employee_id, week_start_date, status=1):
+    """Check if a successful reminder already exists for this employee and week."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+    try:
+        res = (supabase.table('timesheet_reminder_logs')
+               .select('id')
+               .eq('employee_id', str(employee_id))
+               .eq('week_start_date', week_start_date.isoformat())
+               .eq('status', status)
+               .limit(1)
+               .execute())
+        return len(res.data or []) > 0
+    except Exception as e:
+        print(f"Error checking ts reminder existence: {e}")
+    return False

@@ -33,14 +33,21 @@ def render_employees_page(user):
             display_users = display_users.sort_values(by='employee_name')
             
             st.markdown('<div class="table-container">', unsafe_allow_html=True)
-            st.markdown('<div class="table-header"><div style="flex: 2;">Username</div><div style="flex: 3;">Employee Name</div><div style="flex: 3;">Email</div><div style="flex: 2;">Slack ID</div><div style="flex: 2;">Password</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="table-header"><div style="flex: 2;">Username</div><div style="flex: 3;">Employee Name</div><div style="flex: 3;">Email</div><div style="flex: 2;">Slack ID</div><div style="flex: 2;">Status</div><div style="flex: 2;">Password</div></div>', unsafe_allow_html=True)
             for _, row in display_users.iterrows():
                 st.markdown('<div class="table-row">', unsafe_allow_html=True)
-                c1, c2, c_email, c_slack, c3 = st.columns([2, 3, 3, 2, 2])
+                c1, c2, c_email, c_slack, c_status, c3 = st.columns([2, 3, 3, 2, 2, 2])
                 c1.markdown(f'<div class="table-cell">{row["username"]}</div>', unsafe_allow_html=True)
                 c2.markdown(f'<div class="table-cell"><b>{row["employee_name"] if row["employee_name"] else "N/A"}</b></div>', unsafe_allow_html=True)
                 c_email.markdown(f'<div class="table-cell">{row["email"] if row.get("email") else "-"}</div>', unsafe_allow_html=True)
                 c_slack.markdown(f'<div class="table-cell">{row["slack_id"] if row["slack_id"] else "-"}</div>', unsafe_allow_html=True)
+                
+                status_val = row.get("status", 1)
+                if status_val == 1:
+                    status_badge = '<span style="background-color: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold;">Active</span>'
+                else:
+                    status_badge = '<span style="background-color: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 12px; font-size: 0.85em; font-weight: bold;">Inactive</span>'
+                c_status.markdown(f'<div class="table-cell">{status_badge}</div>', unsafe_allow_html=True)
                 
                 # Show password to admin/system administrator
                 is_admin = user["role"] == "admin" or user["username"] == "admin"
@@ -60,6 +67,7 @@ def render_employees_page(user):
             emp_name = st.text_input("Name *")
             email = st.text_input("Email")
             slack_id = st.text_input("Slack ID")
+            status_sel = st.selectbox("Status", ["Active", "Inactive"])
             
             submitted = st.form_submit_button("Add Employee", type="primary")
             if submitted:
@@ -68,7 +76,8 @@ def render_employees_page(user):
                 elif email and not is_valid_email(email):
                     st.error("Invalid email format.")
                 else:
-                    success, msg = add_employee(emp_id, emp_name, slack_id, email)
+                    status_val = 1 if status_sel == "Active" else 0
+                    success, msg = add_employee(emp_id, emp_name, slack_id, email, status=status_val)
                     if success:
                         st.success(msg)
                         st.rerun()
@@ -84,11 +93,18 @@ def render_employees_page(user):
             selected_emp_id = emp_options[selected_emp_label]
             
             emp_data = users[users['employee_id'] == selected_emp_id].iloc[0]
+            emp_is_active = emp_data.get('status', 1) == 1
+            
+            if not emp_is_active:
+                st.info("ℹ️ This employee is currently inactive. The information is available in read-only mode, but you can change their status to Active.")
             
             with st.form("edit_employee_form"):
-                e_name = st.text_input("Name *", value=emp_data['employee_name'] or "")
-                e_email = st.text_input("Email", value=emp_data.get('email') or "")
-                e_slack = st.text_input("Slack ID", value=emp_data['slack_id'] or "")
+                e_name = st.text_input("Name *", value=emp_data['employee_name'] or "", disabled=not emp_is_active)
+                e_email = st.text_input("Email", value=emp_data.get('email') or "", disabled=not emp_is_active)
+                e_slack = st.text_input("Slack ID", value=emp_data['slack_id'] or "", disabled=not emp_is_active)
+                
+                status_idx = 0 if emp_is_active else 1
+                e_status = st.selectbox("Status", ["Active", "Inactive"], index=status_idx)
                 
                 updated = st.form_submit_button("Save Changes", type="primary")
                 if updated:
@@ -97,7 +113,8 @@ def render_employees_page(user):
                     elif e_email and not is_valid_email(e_email):
                         st.error("Invalid email format.")
                     else:
-                        success, msg = update_employee(selected_emp_id, e_name, e_slack, e_email)
+                        status_val = 1 if e_status == "Active" else 0
+                        success, msg = update_employee(selected_emp_id, e_name, e_slack, e_email, status=status_val)
                         if success:
                             st.success(msg)
                             st.rerun()
