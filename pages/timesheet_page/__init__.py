@@ -1,11 +1,11 @@
 import streamlit as st
 import datetime
 import pandas as pd
-import io
-import openpyxl
+
 from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry, add_timesheet_entry, is_employee_active
 from components.dialogs import entry_form_dialog, edit_form_dialog
 from utils.date_helpers import get_curr_cycle_dates
+from utils.xlsx_export import build_clean_xlsx
 
 def render_timesheet_page(user):
     is_admin = user.get("role") == "admin"
@@ -242,97 +242,53 @@ def render_timesheet_page(user):
     with btn_col2:
         st.write("")
         if not data.empty:
+            # ----------------------------------------------------------------
+            # Build export DataFrame
+            # ----------------------------------------------------------------
             export_df = data.copy().rename(columns={
-                'project_code': 'Project_Code', 
-                'emp_name': 'Emp_Name', 
-                'project_name': 'Project_Name', 
-                'date': 'Date', 
-                'hours': 'Hours', 
+                'project_code': 'Project_Code',
+                'emp_name': 'Emp_Name',
+                'project_name': 'Project_Name',
+                'date': 'Date',
+                'hours': 'Hours',
                 'Phase': 'Phase',
                 'project_status': 'Status',
                 'comment': 'Comment'
             })
             export_df['Emp_Code'] = data['emp_id']
             export_df['Date'] = pd.to_datetime(export_df['Date']).dt.strftime('%d-%m-%Y')
-            phase_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployement", "6": "Support"}
+            phase_map = {"1": "Analysis", "2": "Design", "3": "Development",
+                         "4": "Testing", "5": "Deployement", "6": "Support"}
             export_df['Phase'] = export_df['Phase'].astype(str).map(phase_map).fillna(export_df['Phase'])
             export_df.rename(columns={'Phase': 'Phases'}, inplace=True)
-            
-            # Convert columns to numeric to avoid Excel "Number Stored as Text" warnings
+
+            # Convert to numeric to avoid "Number Stored as Text" warnings
             export_df['Emp_Code'] = pd.to_numeric(export_df['Emp_Code'], errors='coerce')
             export_df['Project_Code'] = pd.to_numeric(export_df['Project_Code'], errors='coerce')
-            
-            # Sort by Employee Code then Date to match screenshot
+
+            # Sort and select final columns
             export_df = export_df.sort_values(by=['Emp_Code', 'Date'])
-            
-            # Select columns in requested order
-            output_df = export_df[['Date', 'Emp_Code', 'Emp_Name', 'Project_Code', 'Project_Name', 'Status', 'Phases', 'Comment', 'Hours']]
-            
-            # --- Sanitize blank cells: ensure they are truly empty (None) ---
-            # Strip whitespace from string columns; convert empty/whitespace-only strings to None
-            for col in output_df.columns:
-                if output_df[col].dtype == object:
-                    output_df[col] = output_df[col].apply(
-                        lambda x: x.strip() if isinstance(x, str) and x.strip() != '' else (None if isinstance(x, str) else x)
-                    )
-            # Replace any remaining NaN/NaT with None so openpyxl writes truly empty cells
-            output_df = output_df.where(output_df.notna(), other=None)
-            
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                output_df.to_excel(writer, index=False, sheet_name='Timesheets')
-                
-                # Remove default pandas header styling (bold, borders)
-                worksheet = writer.sheets['Timesheets']
-                for cell in worksheet[1]:
-                    if cell.font:
-                        cell.font = openpyxl.styles.Font(bold=False)
-                    if cell.border:
-                        cell.border = openpyxl.styles.Border()
-                
-                # Determine data boundaries to avoid touching cells outside the data range
-                max_data_row = worksheet.max_row
-                max_data_col = worksheet.max_column
-                
-                # Auto-adjust column widths and wrap text for Comment
-                for col_idx in range(1, max_data_col + 1):
-                    max_length = 0
-                    column_letter = openpyxl.utils.get_column_letter(col_idx)
-                    is_comment = False
-                    for row_idx in range(1, max_data_row + 1):
-                        cell = worksheet.cell(row=row_idx, column=col_idx)
-                        if row_idx == 1:
-                            if cell.value == 'Comment':
-                                is_comment = True
-                        # Only apply formatting to cells that have actual content
-                        if is_comment and row_idx > 1 and cell.value is not None:
-                            cell.alignment = openpyxl.styles.Alignment(wrap_text=True)
-                        if cell.value is not None:
-                            cell_len = len(str(cell.value))
-                            if cell_len > max_length:
-                                max_length = cell_len
-                    if is_comment:
-                        adjusted_width = 40
-                    else:
-                        adjusted_width = (max_length + 2)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-                
-                # Final pass: ensure any cell that should be blank is truly empty
-                # Clear out cells that have no value but may have residual formatting
-                for row in worksheet.iter_rows(min_row=2, max_row=max_data_row, max_col=max_data_col):
-                    for cell in row:
-                        if cell.value is None or (isinstance(cell.value, str) and cell.value.strip() == ''):
-                            cell.value = None
-                            cell._style = worksheet.cell(row=1, column=1)._style.__class__()
-            
+            output_df = export_df[[
+                'Date', 'Emp_Code', 'Emp_Name', 'Project_Code',
+                'Project_Name', 'Status', 'Phases', 'Comment', 'Hours'
+            ]]
+
+            # ----------------------------------------------------------------
+            # Generate clean XLSX via utility (fixes hidden/stale cells)
+            # ----------------------------------------------------------------
+            xlsx_bytes = build_clean_xlsx(output_df, sheet_name='Timesheets')
+
             export_dt = datetime.datetime.now()
-            file_name = f"TS_Exp_{export_dt.strftime('%d%m')}_{export_dt.strftime('%H%M')}_Rng_{start_date.strftime('%d%m')}_{end_date.strftime('%d%m')}.xlsx"
-            
+            file_name = (
+                f"TS_Exp_{export_dt.strftime('%d%m')}_{export_dt.strftime('%H%M')}"
+                f"_Rng_{start_date.strftime('%d%m')}_{end_date.strftime('%d%m')}.xlsx"
+            )
+
             st.download_button(
-                label="📥 Export Excel", 
-                data=buffer.getvalue(), 
-                file_name=file_name, 
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                label="📥 Export Excel",
+                data=xlsx_bytes,
+                file_name=file_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
             )

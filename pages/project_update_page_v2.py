@@ -148,6 +148,8 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         except (ValueError, TypeError):
             return v
 
+    from utils.xlsx_export import sanitise_dataframe, deep_clean_worksheet, apply_column_widths
+
     if 'project_code' in clean_df.columns:
         clean_df['project_code'] = clean_df['project_code'].apply(_to_numeric_where_possible)
     if 'lead_engineer' in clean_df.columns:
@@ -156,13 +158,17 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
 
     renamed_df = clean_df[export_cols_keys].rename(columns=export_cols_map)
+    renamed_df = sanitise_dataframe(renamed_df)
+    
+    n_data_rows = len(renamed_df) + 1
+    n_data_cols = len(renamed_df.columns)
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         renamed_df.to_excel(writer, index=False, sheet_name='Updated Projects')
+        worksheet = writer.sheets['Updated Projects']
         
         if highlight_updated:
-            worksheet = writer.sheets['Updated Projects']
             yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
             for row_idx in range(len(clean_df)):
                 for col_idx, key in enumerate(export_cols_keys):
@@ -170,6 +176,9 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
                     if flag_col in clean_df.columns and clean_df.iloc[row_idx][flag_col] == True:
                         cell = worksheet.cell(row=row_idx + 2, column=col_idx + 1)
                         cell.fill = yellow_fill
+                        
+        apply_column_widths(worksheet, n_data_rows, n_data_cols, comment_col_name="None")
+        deep_clean_worksheet(worksheet, n_data_rows, n_data_cols)
     
     return buffer.getvalue()
 

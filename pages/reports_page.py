@@ -173,16 +173,15 @@ def render_reports_page(user):
                 if 'Status' in excel_export.columns:
                     excel_export['Status'] = excel_export['Status'].replace({'✅': 'Complete', '❌': 'Incomplete'})
                 
-                sum_buffer = io.BytesIO()
-                with pd.ExcelWriter(sum_buffer, engine='openpyxl') as writer:
-                    if not excel_export.empty:
-                        excel_export.to_excel(writer, sheet_name='Summary', index=False)
-                    else:
-                        pd.DataFrame().to_excel(writer, sheet_name='Summary', index=False)
+                from utils.xlsx_export import build_clean_xlsx
+                if not excel_export.empty:
+                    xlsx_bytes = build_clean_xlsx(excel_export, sheet_name='Summary')
+                else:
+                    xlsx_bytes = build_clean_xlsx(pd.DataFrame(), sheet_name='Summary')
                 
                 st.download_button(
                     "📊 Export Summary (Excel)", 
-                    sum_buffer.getvalue(), 
+                    xlsx_bytes, 
                     f"report_summary_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
                     use_container_width=True,
@@ -190,7 +189,6 @@ def render_reports_page(user):
                 )
                 
                 # Excel export for Phase Breakdown
-                buffer = io.BytesIO()
                 if not ts_data.empty:
                     phase_inv_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployment", "6": "Support"}
                     df_export = ts_data.copy()
@@ -226,22 +224,13 @@ def render_reports_page(user):
                     else:
                         pivot_export = pivot_export.applymap(_format_val)
                     
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        pivot_export.to_excel(writer, sheet_name='Sheet1', index=False)
-                        
-                        # Remove all bold styling for simple format
-                        worksheet = writer.sheets['Sheet1']
-                        for row in worksheet.iter_rows():
-                            for cell in row:
-                                if cell.font and cell.font.bold:
-                                    cell.font = cell.font.copy(bold=False)
+                    xlsx_phase_bytes = build_clean_xlsx(pivot_export, sheet_name='Sheet1')
                 else:
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        pd.DataFrame().to_excel(writer)
+                    xlsx_phase_bytes = build_clean_xlsx(pd.DataFrame(), sheet_name='Sheet1')
                 
                 st.download_button(
                     "📈 Export By Phase (Excel)", 
-                    buffer.getvalue(), 
+                    xlsx_phase_bytes, 
                     f"report_phase_breakdown_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx", 
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,

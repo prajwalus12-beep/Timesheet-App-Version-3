@@ -1,13 +1,10 @@
 import streamlit as st
 import pandas as pd
-import io
 from database.queries import import_employees, import_projects, import_assignments, import_project_updates
+from utils.xlsx_export import build_clean_xlsx
 
 def get_excel_download(df):
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    return buffer.getvalue()
+    return build_clean_xlsx(df)
 
 def read_excel_or_csv(uploaded_file):
     """Read File depending on extension."""
