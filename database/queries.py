@@ -1167,3 +1167,30 @@ def check_ts_reminder_exists(employee_id, week_start_date, status=1):
     except Exception as e:
         print(f"Error checking ts reminder existence: {e}")
     return False
+
+_REMINDER_LOG_RETENTION_DAYS = 28  # 4 weeks — not user-configurable
+
+def cleanup_old_reminder_logs():
+    """Delete timesheet reminder logs older than 4 weeks (28 days).
+
+    The retention window is system-managed and hardcoded to
+    ``_REMINDER_LOG_RETENTION_DAYS``.  Do NOT expose this value as a
+    user-configurable setting.
+
+    Returns
+    -------
+    int
+        Number of records deleted, or 0 on error.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return 0
+    import datetime as _dt
+    try:
+        cutoff = (_dt.datetime.now() - _dt.timedelta(days=_REMINDER_LOG_RETENTION_DAYS)).isoformat()
+        res = supabase.table('timesheet_reminder_logs').delete().lt('created_at', cutoff).execute()
+        count = len(res.data or [])
+        return count
+    except Exception as e:
+        print(f"Error cleaning up old ts reminder logs: {e}")
+    return 0

@@ -272,3 +272,12 @@ def render_settings_page():
                     if not ok3: errors.append(msg3)
                     st.error(f"❌ Failed to save settings: {'; '.join(errors)}")
 
+        # --- Automatic Log Cleanup Notice (read-only, system-managed) ---
+        st.divider()
+        st.info(
+            "🗑️ **Automatic Log Cleanup**\n\n"
+            "Timesheet reminder logs older than **4 weeks** are automatically deleted "
+            "every 4 weeks during nighttime hours (02:00). "
+            "This setting is managed by the system and cannot be changed."
+        )
+

@@ -20,6 +20,7 @@ _scheduler = None
 _lock = threading.Lock()
 
 JOB_ID = "timesheet_reminder_cron"
+CLEANUP_JOB_ID = "ts_reminder_log_cleanup"
 
 
 def _get_scheduler():
@@ -58,6 +59,57 @@ def _reminder_job():
     logger.info(
         "Cron reminder complete: %d sent, %d failed, %d skipped out of %d total.",
         result['sent'], result['failed'], result['skipped'], result['total']
+    )
+
+
+# ------------------------------------------------------------------
+# Cleanup job
+# ------------------------------------------------------------------
+
+_CLEANUP_INTERVAL_DAYS = 28   # 4 weeks — not user-configurable
+_CLEANUP_HOUR = 2             # 02:00 — off-peak night-time hour
+
+
+def _cleanup_job():
+    """Callback: delete timesheet reminder logs older than 4 weeks."""
+    from database.queries import cleanup_old_reminder_logs
+
+    logger.info("Log-cleanup job triggered at %s", datetime.datetime.now().isoformat())
+    count = cleanup_old_reminder_logs()
+    logger.info("Log-cleanup complete: %d record(s) deleted.", count)
+
+
+def _schedule_cleanup_job(scheduler):
+    """Register the log-cleanup job on *scheduler*.
+
+    Schedule: every 28 days at 02:00 (local time), starting from the
+    next upcoming 02:00 after app initialisation.
+    Safe to call multiple times — always removes the old job first.
+    """
+    if scheduler.get_job(CLEANUP_JOB_ID):
+        scheduler.remove_job(CLEANUP_JOB_ID)
+        logger.info("Removed existing cleanup job '%s'.", CLEANUP_JOB_ID)
+
+    # Anchor start_date to next 02:00 so the job always runs at night.
+    now = datetime.datetime.now()
+    start_date = now.replace(hour=_CLEANUP_HOUR, minute=0, second=0, microsecond=0)
+    if start_date <= now:
+        # If 02:00 has already passed today, begin tomorrow night.
+        start_date += datetime.timedelta(days=1)
+
+    from apscheduler.triggers.interval import IntervalTrigger
+    trigger = IntervalTrigger(days=_CLEANUP_INTERVAL_DAYS, start_date=start_date)
+
+    scheduler.add_job(
+        _cleanup_job,
+        trigger=trigger,
+        id=CLEANUP_JOB_ID,
+        name="Timesheet Reminder Log Cleanup",
+        replace_existing=True,
+    )
+    logger.info(
+        "Scheduled log-cleanup: every %d days at %02d:00, first run %s.",
+        _CLEANUP_INTERVAL_DAYS, _CLEANUP_HOUR, start_date.isoformat(),
     )
 
 
@@ -132,6 +184,12 @@ def initialize_scheduler():
 
     enabled = enabled_str.lower() == 'true'
     update_reminder_schedule(enabled, days_str, time_str)
+
+    # Register the log-cleanup job unconditionally — it is always active.
+    scheduler = _get_scheduler()
+    with _lock:
+        _schedule_cleanup_job(scheduler)
+
     logger.info("Scheduler initialized. Enabled=%s, Days=%s, Time=%s", enabled, days_str, time_str)
 
 
