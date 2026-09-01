@@ -22,10 +22,10 @@ input[type=number] {
 .pu-container {
   max-width: 100%;
   margin: 0 auto;
-  transition: filter 200ms ease;
 }
 .pu-container.blurred {
-  filter: blur(4px);
+  /* Disabled full-page blur in favor of localized loaders */
+  filter: none;
 }
 
 .pu-container > * + * { margin-top: 1.5rem; }

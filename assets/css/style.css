@@ -193,3 +193,87 @@ button[kind="primary"]:hover {
     border-left: 1px solid #e2e8f0 !important;
     border-right: 1px solid #e2e8f0 !important;
 }
+
+/* ==========================================================================
+   Prevent Full-Page Blur & Stale Dimming Overlay during Streamlit Reruns
+   ========================================================================== */
+[data-stale="true"],
+.element-container[data-stale="true"],
+div[data-testid="stAppViewContainer"] [data-stale="true"],
+[data-testid="stVerticalBlock"][data-stale="true"],
+[data-testid="stHorizontalBlock"][data-stale="true"],
+[data-testid="stMainBlockContainer"][data-stale="true"],
+[data-testid="stSidebar"][data-stale="true"],
+[data-testid="stHeader"][data-stale="true"],
+div[data-testid="stBottomBlockContainer"][data-stale="true"],
+section.main[data-stale="true"] {
+    opacity: 1 !important;
+    filter: none !important;
+    -webkit-filter: none !important;
+    transition: none !important;
+    pointer-events: auto !important;
+}
+
+/* Ensure no global backdrop blur during execution */
+.stApp[data-test-script-state="running"] [data-stale="true"],
+.stApp[data-test-script-state="running"] {
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+/* Modal Dialog backdrop without intense blur */
+div[data-testid="stModal"] > div,
+div[data-testid="stDialog"] > div {
+    backdrop-filter: blur(1px) !important;
+    -webkit-backdrop-filter: blur(1px) !important;
+}
+
+/* Localized Spinner & Loading Components */
+.ts-inline-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #cbd5e1;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: ts-spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
+@keyframes ts-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Localized Status & Info Badge */
+.ts-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+.ts-status-badge.loading {
+    background: #eff6ff;
+    color: #1e40af;
+    border-color: #bfdbfe;
+}
+
+/* Skeleton Loading Animation */
+@keyframes ts-shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+}
+
+.ts-skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 800px 100%;
+    animation: ts-shimmer 1.5s infinite linear;
+    border-radius: 4px;
+}

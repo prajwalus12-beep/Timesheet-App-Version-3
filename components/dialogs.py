@@ -197,13 +197,17 @@ def entry_form_dialog(user, emp_options, current_emp_id):
                 st.session_state.pop('_entry_selected_proj_key', None)
                 st.stop()
             else:
-                proj_data = all_proj_options[entry_proj_key]
-                e_id = emp_options[entry_emp]
-                e_name = entry_emp.split(" (")[0]
-                add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
-                st.session_state.pop('_entry_selected_proj_key', None)
-                st.success("Entry Added!")
-                st.rerun()
+                with st.spinner("Saving entry..."):
+                    proj_data = all_proj_options[entry_proj_key]
+                    e_id = emp_options[entry_emp]
+                    e_name = entry_emp.split(" (")[0]
+                    success, err = add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
+                    if success:
+                        st.session_state.pop('_entry_selected_proj_key', None)
+                        st.toast("✅ Entry added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add entry: {err}")
 
 @st.dialog("Add Multiple Entries")
 def multiple_entry_dialog(user, emp_labels, current_emp_id):
@@ -254,13 +258,19 @@ def multiple_entry_dialog(user, emp_labels, current_emp_id):
                 st.warning(f"Entry {idx+1}: Project not selected.")
                 st.stop()
         # All validations passed – insert rows
-        for e in entries:
-            proj_data = proj_options[e["proj_key"]]
-            e_id = emp_labels[e["emp_key"]]
-            e_name = e["emp_key"].split(" (")[0]
-            add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], e["date"], e["hours"], e["phase"], proj_data[2], e["comment"])
-        st.success(f"Added {len(entries)} entries successfully!")
-        st.rerun()
+        with st.spinner(f"Saving {len(entries)} entries..."):
+            all_ok = True
+            for e in entries:
+                proj_data = proj_options[e["proj_key"]]
+                e_id = emp_labels[e["emp_key"]]
+                e_name = e["emp_key"].split(" (")[0]
+                ok, err = add_timesheet_entry(e_id, e_name, proj_data[0], proj_data[1], e["date"], e["hours"], e["phase"], proj_data[2], e["comment"])
+                if not ok:
+                    all_ok = False
+                    st.error(f"Error adding entry: {err}")
+            if all_ok:
+                st.toast(f"✅ Added {len(entries)} entries successfully!")
+                st.rerun()
 
 @st.dialog("Edit Entry")
 def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
@@ -433,11 +443,15 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
                 st.session_state.pop('_edit_selected_proj_key', None)
                 st.stop()
             else:
-                proj_data = all_proj_options[entry_proj_key]
-                e_id = emp_options[entry_emp]
-                e_name = entry_emp.split(" (")[0]
-                update_timesheet_entry(entry_data['id'], e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
-                st.session_state.pop('_edit_selected_proj_key', None)
-                st.success("Entry Updated!")
-                st.rerun()
+                with st.spinner("Updating entry..."):
+                    proj_data = all_proj_options[entry_proj_key]
+                    e_id = emp_options[entry_emp]
+                    e_name = entry_emp.split(" (")[0]
+                    success, err = update_timesheet_entry(entry_data['id'], e_id, e_name, proj_data[0], proj_data[1], entry_date, entry_hours, entry_phase, proj_data[2], entry_comment)
+                    if success:
+                        st.session_state.pop('_edit_selected_proj_key', None)
+                        st.toast("✅ Entry updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to update entry: {err}")
 

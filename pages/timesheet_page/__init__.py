@@ -160,10 +160,21 @@ def render_timesheet_page(user):
             st.markdown('<div class="filter-label-phantom">&nbsp;</div>', unsafe_allow_html=True)
             if st.button("🧹 Clear", use_container_width=True, key="clear_main_filters"):
                 st.session_state._reset_filters = True
+                st.toast("🧹 Filters reset to default", icon="ℹ️")
                 st.rerun()
 
-    # Integrated Date Range Display under the filter box
-    st.caption(f"Showing records from :blue[**{start_date.strftime('%d-%m-%Y')}**] to :blue[**{end_date.strftime('%d-%m-%Y')}**]")
+    # Fetch timesheet dataset
+    data = get_timesheets(start_date, end_date, selected_emp_id, selected_proj_code)
+
+    # Integrated Date Range & Records Status Display under the filter box
+    total_records_count = len(data) if not data.empty else 0
+    st.markdown(
+        f'<div style="display: flex; justify-content: space-between; align-items: center; margin: 4px 0 8px 0; flex-wrap: wrap; gap: 8px;">'
+        f'<span style="font-size: 0.85rem; color: #475569;">Showing records from <strong style="color: #2563eb;">{start_date.strftime("%d-%m-%Y")}</strong> to <strong style="color: #2563eb;">{end_date.strftime("%d-%m-%Y")}</strong></span>'
+        f'<span class="ts-status-badge"><span>📊</span> <strong>{total_records_count}</strong> records</span>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     # Initialize fixed multi-level sorting
     if 'ts_sort_priority' not in st.session_state:
@@ -195,14 +206,10 @@ def render_timesheet_page(user):
         for i, (c, o) in enumerate(st.session_state.ts_sort_priority):
             if c == col:
                 icon = "🔼" if o == 'asc' else "🔽"
-                # For Date, just show the icon. For secondary, show '2' if helpful, 
-                # but following user request just the icon/arrow is usually enough.
-                # Let's show (P) for Primary and (S) for Secondary or just arrows.
                 label = " (P)" if i == 0 else " (S)"
                 return f"{icon}{label}"
         return "↕️"
 
-    data = get_timesheets(start_date, end_date, selected_emp_id, selected_proj_code)
 
     # Apply hierarchical sorting logic
     if not data.empty:
@@ -559,25 +566,40 @@ def render_timesheet_page(user):
                     act_edit, act_del, act_dup = st.columns([1, 1, 1], gap="small")
                     if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Record", disabled=not current_emp_active):
                         edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
-                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Delete", disabled=not current_emp_active):
-                        delete_timesheet_entry(row['id'])
+                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Delete Record", disabled=not current_emp_active):
+                        st.toast(f"🗑️ Deleting entry for {row['project_code']}...", icon="⏳")
+                        success, err = delete_timesheet_entry(row['id'])
+                        if success:
+                            st.toast("✅ Entry deleted successfully!")
+                        else:
+                            st.toast(f"❌ Failed to delete: {err}", icon="⚠️")
                         st.rerun()
-                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate", disabled=not current_emp_active):
-                        add_timesheet_entry(
+                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Record", disabled=not current_emp_active):
+                        st.toast(f"📋 Duplicating entry for {row['project_code']}...", icon="⏳")
+                        success, err = add_timesheet_entry(
                             row['emp_id'], row['emp_name'], row['project_code'], 
                             row['project_name'], row['date'], row['hours'], 
                             row['Phase'], row['project_status'], row.get('comment', '')
                         )
+                        if success:
+                            st.toast("✅ Entry duplicated successfully!")
+                        else:
+                            st.toast(f"❌ Failed to duplicate: {err}", icon="⚠️")
                         st.rerun()
                 else:
                     act_lock, act_dup = st.columns([1, 1], gap="small")
                     act_lock.button(":material/lock:", key=f"lock_btn_{row['id']}", disabled=True, help="Locked")
-                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate"):
-                        add_timesheet_entry(
+                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Record"):
+                        st.toast(f"📋 Duplicating entry for {row['project_code']}...", icon="⏳")
+                        success, err = add_timesheet_entry(
                             row['emp_id'], row['emp_name'], row['project_code'], 
                             row['project_name'], row['date'], row['hours'], 
                             row['Phase'], row['project_status'], row.get('comment', '')
                         )
+                        if success:
+                            st.toast("✅ Entry duplicated successfully!")
+                        else:
+                            st.toast(f"❌ Failed to duplicate: {err}", icon="⚠️")
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
             
