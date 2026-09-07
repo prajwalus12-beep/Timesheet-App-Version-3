@@ -13,7 +13,7 @@ def render_timesheet_page(user):
     if is_admin:
         hdr_col, chk_col, btn_reminder, btn_col2 = st.columns([4.0, 1.5, 2.0, 1.5])
     else:
-        hdr_col, btn_col1, btn_col2 = st.columns([7, 1.5, 1.5])
+        hdr_col, btn_leave, btn_col1, btn_col2 = st.columns([5.5, 1.5, 1.5, 1.5])
 
     with hdr_col:
         st.subheader("Timesheet Entries", divider="blue")
@@ -243,8 +243,12 @@ def render_timesheet_page(user):
     current_emp_id = user.get("employee_id")
     emp_labels = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in emps.iterrows()}
 
-    # Only non-admins have the "Add Entry" button
+    # Only non-admins (employees) have the "Add Leave" and "Add Entry" buttons
     if not is_admin:
+        with btn_leave:
+            st.write("")
+            if st.button("⛱️ Add Leave", type="primary", use_container_width=True, disabled=not current_emp_active):
+                add_leave_dialog(user, emp_labels, current_emp_id)
         with btn_col1:
             st.write("")
             if st.button("➕ Add Entry", type="primary", use_container_width=True, disabled=not current_emp_active):
