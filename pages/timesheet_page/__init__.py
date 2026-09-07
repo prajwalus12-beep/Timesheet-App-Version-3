@@ -3,7 +3,7 @@ import datetime
 import pandas as pd
 
 from database.queries import get_timesheets, get_all_employees, get_all_projects, delete_timesheet_entry, add_timesheet_entry, is_employee_active
-from components.dialogs import entry_form_dialog, edit_form_dialog
+from components.dialogs import entry_form_dialog, edit_form_dialog, add_leave_dialog, edit_leave_dialog
 from utils.date_helpers import get_curr_cycle_dates
 from utils.xlsx_export import build_clean_xlsx
 
@@ -239,20 +239,24 @@ def render_timesheet_page(user):
             sort_ascending.append(False)
             data = data.sort_values(by=sort_fields, ascending=sort_ascending)
 
+    emps = get_all_employees()
+    current_emp_id = user.get("employee_id")
+    emp_labels = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in emps.iterrows()}
+
     # Only non-admins have the "Add Entry" button
     if not is_admin:
         with btn_col1:
             st.write("")
             if st.button("➕ Add Entry", type="primary", use_container_width=True, disabled=not current_emp_active):
                 entry_form_dialog(user, emp_labels, current_emp_id)
-    
+            
     with btn_col2:
         st.write("")
         if not data.empty:
             # ----------------------------------------------------------------
             # Build export DataFrame
-            # ----------------------------------------------------------------
-            export_df = data.copy().rename(columns={
+            # Filter out leave entries
+            export_df = data[~data['project_code'].str.startswith('LEAVE-', na=False)].copy().rename(columns={
                 'project_code': 'Project_Code',
                 'emp_name': 'Emp_Name',
                 'project_name': 'Project_Name',
@@ -527,20 +531,32 @@ def render_timesheet_page(user):
         for idx, row in subset.iterrows():
             r_date_val = row['date']
             if isinstance(r_date_val, str): r_date_val = datetime.datetime.strptime(r_date_val, '%Y-%m-%d').date()
+            is_leave = str(row['project_code']).startswith('LEAVE-')
 
             # Row Container
-            st.markdown('<div class="ts-entry-row">', unsafe_allow_html=True)
+            if is_leave:
+                st.markdown('<div class="ts-entry-row" style="background-color: #fffbeb; border-left: 4px solid #f59e0b;">', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="ts-entry-row">', unsafe_allow_html=True)
             r_col_date, r_col_proj, r_col_emp, r_col_phase, r_col_action = st.columns([1.2, 3.5, 2.0, 1.5, 1.2])
             
             with r_col_date:
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
                 st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px;"><b>{r_date_val.strftime("%Y-%m-%d")}</b></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #64748b; background-color: #f8fafc;">{row["project_code"]}</div>', unsafe_allow_html=True)
+                
+                if is_leave:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #d97706; background-color: #fef3c7;">{row["project_code"]}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #64748b; background-color: #f8fafc;">{row["project_code"]}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with r_col_proj:
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
-                st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px;">{row["project_name"]}</div>', unsafe_allow_html=True)
+                if is_leave:
+                    st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px; background-color: #fffbeb;">🏖️ {row["project_name"]} <span style="font-size: 0.65rem; font-weight: bold; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; margin-left: 5px;">LEAVE LOG</span></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px;">{row["project_name"]}</div>', unsafe_allow_html=True)
+                
                 comment_val = row.get('comment', '') if pd.notna(row.get('comment')) else '—'
                 st.markdown(f'<div class="ts-entry-box" title="{comment_val}" style="font-style: italic; color: #64748b; font-size: 0.8rem; margin-bottom:0;">{comment_val}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -548,15 +564,24 @@ def render_timesheet_page(user):
             with r_col_emp:
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
                 st.markdown(f'<div class="ts-entry-box ts-entry-box-emp" title="{row["emp_name"]}" style="margin-bottom: 4px;">{row["emp_name"]}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0;">{row["project_status"]}</div>', unsafe_allow_html=True)
+                
+                if is_leave:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #d97706;">{row["project_status"]}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0;">{row["project_status"]}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with r_col_phase:
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
-                p_val = str(row.get("Phase", "1"))
-                p_text = phase_labels.get(p_val, p_val)
-                st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px;">{p_text}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0;">{row["hours"]:.2f} hrs</div>', unsafe_allow_html=True)
+                if is_leave:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px; color: #64748b;">Out of Office</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 2px; font-weight: bold; color: #b45309;">{row["hours"]:.2f} hrs</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #ef4444; font-size: 0.65rem; border: none; padding: 0;">🚫 Excluded from export</div>', unsafe_allow_html=True)
+                else:
+                    p_val = str(row.get("Phase", "1"))
+                    p_text = phase_labels.get(p_val, p_val)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px;">{p_text}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0;">{row["hours"]:.2f} hrs</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with r_col_action:
@@ -564,17 +589,20 @@ def render_timesheet_page(user):
                 # Actions
                 if start_of_week <= r_date_val <= end_of_week:
                     act_edit, act_del, act_dup = st.columns([1, 1, 1], gap="small")
-                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Record", disabled=not current_emp_active):
-                        edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
-                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Delete Record", disabled=not current_emp_active):
+                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Leave" if is_leave else "Edit Record", disabled=not current_emp_active):
+                        if is_leave:
+                            edit_leave_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
+                        else:
+                            edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
+                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Cancel Leave" if is_leave else "Delete Record", disabled=not current_emp_active):
                         st.toast(f"🗑️ Deleting entry for {row['project_code']}...", icon="⏳")
                         success, err = delete_timesheet_entry(row['id'])
                         if success:
-                            st.toast("✅ Entry deleted successfully!")
+                            st.toast("✅ Leave cancelled!" if is_leave else "✅ Entry deleted successfully!")
                         else:
                             st.toast(f"❌ Failed to delete: {err}", icon="⚠️")
                         st.rerun()
-                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Record", disabled=not current_emp_active):
+                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Leave" if is_leave else "Duplicate Record", disabled=not current_emp_active):
                         st.toast(f"📋 Duplicating entry for {row['project_code']}...", icon="⏳")
                         success, err = add_timesheet_entry(
                             row['emp_id'], row['emp_name'], row['project_code'], 

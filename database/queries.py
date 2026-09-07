@@ -45,7 +45,7 @@ def is_employee_active(emp_id):
         pass
     return False
 
-def get_all_projects():
+def get_all_projects(include_leave=False):
     """Fetch all projects using Supabase SDK."""
     supabase = get_supabase_client()
     if not supabase: return pd.DataFrame(columns=['project_code', 'project_name', 'status', 'priority', 'lead_engineer', 'trello_link'])
@@ -55,7 +55,10 @@ def get_all_projects():
     
     # Decrypt project names
     decrypted_res = [[r['project_code'], decrypt_data(r['project_name']), r['status'], r.get('priority'), r.get('lead_engineer'), r.get('trello_link')] for r in data]
-    return pd.DataFrame(decrypted_res, columns=['project_code', 'project_name', 'status', 'priority', 'lead_engineer', 'trello_link'])
+    df = pd.DataFrame(decrypted_res, columns=['project_code', 'project_name', 'status', 'priority', 'lead_engineer', 'trello_link'])
+    if not include_leave and not df.empty:
+        df = df[~df['project_code'].astype(str).str.startswith('LEAVE-')].reset_index(drop=True)
+    return df
 
 def get_user_by_username(username):
     """Fetch user details using Supabase SDK."""
@@ -133,6 +136,13 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
     if not is_employee_active(emp_id):
         return False, "Employee is inactive. This action is not available for inactive employees."
         
+    date_str = date.isoformat() if hasattr(date, 'isoformat') else date
+    if not str(project_code).startswith("LEAVE-") and has_leave_for_date(emp_id, date_str):
+        return False, "This date is registered as approved leave. Standard work hours cannot be logged for leave dates."
+
+    if str(project_code).startswith("LEAVE-"):
+        ensure_leave_projects_exist()
+
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
@@ -156,6 +166,94 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
         return True, "Success"
     except Exception as e:
         return False, str(e)
+
+def has_leave_for_date(emp_id, date):
+    """Check if the employee has any leave registered on the given date."""
+    supabase = get_supabase_client()
+    if not supabase: return False
+    date_str = date.isoformat() if hasattr(date, 'isoformat') else date
+    try:
+        # Fetch entries for this employee and date
+        res = supabase.table('timesheet').select('project_code').eq('emp_id', emp_id).eq('date', date_str).execute()
+        data = res.data or []
+        for row in data:
+            if str(row.get('project_code', '')).startswith('LEAVE-'):
+                return True
+        return False
+    except Exception:
+        return False
+
+LEAVE_PROJECT_TYPES = {
+    "Casual Leave": ("LEAVE-CL", "Casual Leave (CL)"),
+    "Sick Leave": ("LEAVE-SL", "Sick Leave (SL)"),
+    "Earned/Paid Leave": ("LEAVE-PL", "Earned/Paid Leave (PL)"),
+    "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)")
+}
+
+def ensure_leave_projects_exist():
+    """Ensure standard leave project records exist in the project table to satisfy foreign key constraints."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return
+    try:
+        leave_records = [
+            {"project_code": "LEAVE-CL", "project_name": encrypt_data("Casual Leave (CL)"), "status": "Leave"},
+            {"project_code": "LEAVE-SL", "project_name": encrypt_data("Sick Leave (SL)"), "status": "Leave"},
+            {"project_code": "LEAVE-PL", "project_name": encrypt_data("Earned/Paid Leave (PL)"), "status": "Leave"},
+            {"project_code": "LEAVE-UL", "project_name": encrypt_data("Unpaid Leave (UL)"), "status": "Leave"},
+            {"project_code": "LEAVE-OTHER", "project_name": encrypt_data("Leave (Other)"), "status": "Leave"},
+        ]
+        supabase.table('project').upsert(leave_records, on_conflict='project_code').execute()
+    except Exception:
+        pass
+
+def add_leave_entries(emp_id, emp_name, leave_type_str, start_date, end_date, reason):
+    """Insert one or more leave entries for a date range."""
+    import datetime
+    
+    # Ensure leave project entries exist in project table to satisfy timesheet foreign key constraint
+    ensure_leave_projects_exist()
+    
+    project_code, project_name = LEAVE_PROJECT_TYPES.get(leave_type_str, ("LEAVE-OTHER", f"Leave ({leave_type_str})"))
+    
+    # In case project_code is custom or not in the standard list, ensure it's in project table
+    try:
+        supabase = get_supabase_client()
+        if supabase:
+            supabase.table('project').upsert([{
+                "project_code": project_code,
+                "project_name": encrypt_data(project_name),
+                "status": "Leave"
+            }], on_conflict='project_code').execute()
+    except Exception:
+        pass
+    
+    current_date = start_date
+    success_count = 0
+    errors = []
+    
+    while current_date <= end_date:
+        ok, err = add_timesheet_entry(
+            emp_id=emp_id,
+            emp_name=emp_name,
+            project_code=project_code,
+            project_name=project_name,
+            date=current_date,
+            hours=8.0,
+            phase="Analysis", # Dummy phase
+            project_status="Approved Leave",
+            comment=reason
+        )
+        if ok:
+            success_count += 1
+        else:
+            errors.append(f"{current_date}: {err}")
+            
+        current_date += datetime.timedelta(days=1)
+        
+    if errors:
+        return False, "; ".join(errors)
+    return True, f"Successfully added {success_count} leave days."
 
 def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=None):
     """Fetch timesheet entries with optional filters using Supabase SDK."""
@@ -218,6 +316,15 @@ def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_nam
     if not is_employee_active(emp_id):
         return False, "Employee is inactive. This action is not available for inactive employees."
         
+    date_str = date.isoformat() if hasattr(date, 'isoformat') else date
+    
+    # We only block if the project being updated IS NOT a leave entry itself
+    if not str(project_code).startswith("LEAVE-") and has_leave_for_date(emp_id, date_str):
+        return False, "This date is registered as approved leave. Standard work hours cannot be logged for leave dates."
+
+    if str(project_code).startswith("LEAVE-"):
+        ensure_leave_projects_exist()
+
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     

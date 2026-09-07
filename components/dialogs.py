@@ -4,7 +4,7 @@ import time
 import json
 import pandas as pd
 import streamlit.components.v1 as components
-from database.queries import get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password, update_user_password
+from database.queries import get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password, update_user_password, has_leave_for_date, add_leave_entries
 from services.auth_service import is_password_strong, encrypt_data
 
 def format_proj_key(code, name, max_len=40):
@@ -187,6 +187,8 @@ def entry_form_dialog(user, emp_options, current_emp_id):
                 st.stop()
             if not entry_date or entry_date > end_of_week:
                 st.warning("Cannot submit entry for a future week date.")
+            elif has_leave_for_date(emp_options[entry_emp], entry_date):
+                st.warning("This date is registered as approved leave. Standard work hours cannot be logged for leave dates.")
             elif entry_hours <= 0:
                 st.warning("Please enter valid hours.")
             elif entry_proj_key == "None":
@@ -250,6 +252,9 @@ def multiple_entry_dialog(user, emp_labels, current_emp_id):
                 st.stop()
             if e["date"] > end_of_week:
                 st.warning(f"Entry {idx+1}: Date cannot be in future week.")
+                st.stop()
+            if has_leave_for_date(emp_labels[e["emp_key"]], e["date"]):
+                st.warning(f"Entry {idx+1}: This date is registered as approved leave. Standard work hours cannot be logged for leave dates.")
                 st.stop()
             if e["hours"] <= 0:
                 st.warning(f"Entry {idx+1}: Hours must be > 0.")
@@ -433,6 +438,8 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
                 st.stop()
             if not entry_date or entry_date > end_of_week:
                 st.warning("Cannot update entry to a future week date.")
+            elif entry_proj_key != "None" and entry_proj_key in all_proj_options and not str(all_proj_options[entry_proj_key][0]).startswith("LEAVE-") and has_leave_for_date(emp_options[entry_emp], entry_date):
+                st.warning("This date is registered as approved leave. Standard work hours cannot be logged for leave dates.")
             elif entry_hours <= 0:
                 st.warning("Please enter valid hours.")
             elif entry_proj_key == "None":
@@ -455,3 +462,110 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
                     else:
                         st.error(f"❌ Failed to update entry: {err}")
 
+@st.dialog("Add Leave Request")
+def add_leave_dialog(user, emp_options, current_emp_id):
+    st.markdown("**Excludes date from timesheet log & export**")
+    user_option_key = next((k for k, v in emp_options.items() if v == current_emp_id), None)
+    options = list(emp_options.keys())
+    default_idx = options.index(user_option_key) if user_option_key in options else 0
+    
+    leave_emp = st.selectbox("Employee Name", options, index=default_idx, disabled=not (user.get("role") == "admin"), key="leave_emp_modal")
+    leave_type = st.selectbox("Leave Type", ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave"], key="leave_type_modal")
+    
+    col_start, col_end = st.columns(2)
+    with col_start:
+        start_date = st.date_input("Start Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_start_modal")
+    with col_end:
+        end_date = st.date_input("End Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_end_modal")
+        
+    reason = st.text_area("Reason / Notes", placeholder="e.g. Personal errand / Doctor appointment", key="leave_reason_modal")
+    
+    st.info("⚙️ **Automatic Exclusions Applied:**\n\n- Date will be locked against regular work time logging.\n- Will be omitted from client billable Excel reports.\n- Suppresses automated 'Timesheet Missing' emails for this date.")
+    
+    if st.button("Confirm & Add Leave", type="primary", use_container_width=True):
+        if end_date < start_date:
+            st.error("End Date cannot be before Start Date.")
+            st.stop()
+        if not reason.strip():
+            st.warning("Reason / Notes is required.")
+            st.stop()
+            
+        with st.spinner("Adding leave..."):
+            e_id = emp_options[leave_emp]
+            e_name = leave_emp.split(" (")[0]
+            success, err = add_leave_entries(e_id, e_name, leave_type, start_date, end_date, reason)
+            if success:
+                st.toast("✅ Leave added successfully!")
+                st.rerun()
+            else:
+                st.error(f"❌ Failed to add leave: {err}")
+
+@st.dialog("Edit Leave Entry")
+def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
+    st.markdown("**Edit Leave Details**")
+    current_emp_label = next((k for k, v in emp_options.items() if v == entry_data.get('emp_id')), None)
+    options = list(emp_options.keys())
+    default_emp_idx = options.index(current_emp_label) if current_emp_label in options else 0
+    leave_emp = st.selectbox("Employee Name", options, index=default_emp_idx, disabled=(user_role != "admin"), key="edit_leave_emp_modal")
+    
+    code_to_type = {
+        "LEAVE-CL": "Casual Leave",
+        "LEAVE-SL": "Sick Leave",
+        "LEAVE-PL": "Earned/Paid Leave",
+        "LEAVE-UL": "Unpaid Leave"
+    }
+    current_code = str(entry_data.get('project_code', ''))
+    default_type = code_to_type.get(current_code, "Casual Leave")
+    leave_types = ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave"]
+    default_type_idx = leave_types.index(default_type) if default_type in leave_types else 0
+    leave_type = st.selectbox("Leave Type", leave_types, index=default_type_idx, key="edit_leave_type_modal")
+    
+    today = datetime.date.today()
+    end_of_week = today + datetime.timedelta(days=(6 - today.weekday()))
+    col_d, col_h = st.columns(2)
+    with col_d:
+        row_date = entry_data.get('date')
+        if isinstance(row_date, str):
+            row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
+        entry_date = st.date_input("Date", row_date, max_value=end_of_week, format="DD-MM-YYYY", key="edit_leave_date_modal")
+    with col_h:
+        entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, value=float(entry_data.get('hours', 8.0)), key="edit_leave_hours_modal")
+        
+    current_comment = entry_data.get('comment', '') or ''
+    reason = st.text_area("Reason / Notes", value=str(current_comment), placeholder="e.g. Personal errand / Doctor appointment", key="edit_leave_reason_modal")
+    
+    st.info("⚙️ Leave dates are excluded from regular hours & billable Excel exports.")
+    
+    if st.button("Save Changes", type="primary", use_container_width=True, key="save_leave_edit_btn"):
+        if not reason.strip():
+            st.warning("Reason / Notes is required.")
+            st.stop()
+            
+        type_to_proj = {
+            "Casual Leave": ("LEAVE-CL", "Casual Leave (CL)"),
+            "Sick Leave": ("LEAVE-SL", "Sick Leave (SL)"),
+            "Earned/Paid Leave": ("LEAVE-PL", "Earned/Paid Leave (PL)"),
+            "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)")
+        }
+        proj_code, proj_name = type_to_proj.get(leave_type, ("LEAVE-OTHER", f"Leave ({leave_type})"))
+        e_id = emp_options[leave_emp]
+        e_name = leave_emp.split(" (")[0]
+        
+        with st.spinner("Updating leave entry..."):
+            success, err = update_timesheet_entry(
+                entry_id=entry_data['id'],
+                emp_id=e_id,
+                emp_name=e_name,
+                project_code=proj_code,
+                project_name=proj_name,
+                date=entry_date,
+                hours=entry_hours,
+                phase="Analysis",
+                project_status="Approved Leave",
+                comment=reason
+            )
+            if success:
+                st.toast("✅ Leave entry updated successfully!")
+                st.rerun()
+            else:
+                st.error(f"❌ Failed to update leave: {err}")
