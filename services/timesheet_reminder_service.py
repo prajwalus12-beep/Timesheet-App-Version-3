@@ -31,14 +31,27 @@ def get_current_week_range(reference_date=None):
 
 
 def get_applicable_days(reference_date=None):
-    """Return the list of working-day dates (Mon–Fri) that should be checked."""
+    """Return the list of working-day dates (Mon–Fri) that should be checked, excluding configured holidays."""
     if reference_date is None:
         reference_date = datetime.date.today()
     monday, friday = get_current_week_range(reference_date)
+    
+    # Exclude organization holidays
+    holiday_dates = set()
+    try:
+        from database.queries import get_all_holidays
+        import pandas as pd
+        h_df = get_all_holidays(year=reference_date.year)
+        if not h_df.empty:
+            holiday_dates = set(pd.to_datetime(h_df['holiday_date']).dt.date)
+    except Exception as e:
+        logger.warning("Could not fetch holidays for reminder service: %s", e)
+
     days = []
     for i in range(5):  # Mon=0 … Fri=4
         day = monday + datetime.timedelta(days=i)
-        days.append(day)
+        if day not in holiday_dates:
+            days.append(day)
     return days
 
 

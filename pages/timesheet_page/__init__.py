@@ -259,8 +259,8 @@ def render_timesheet_page(user):
         if not data.empty:
             # ----------------------------------------------------------------
             # Build export DataFrame
-            # Filter out leave entries
-            export_df = data[~data['project_code'].str.startswith('LEAVE-', na=False)].copy().rename(columns={
+            # Filter out leave and holiday entries
+            export_df = data[~data['project_code'].astype(str).str.startswith(('LEAVE-', 'HOLIDAY'), na=False)].copy().rename(columns={
                 'project_code': 'Project_Code',
                 'emp_name': 'Emp_Name',
                 'project_name': 'Project_Name',
@@ -536,10 +536,13 @@ def render_timesheet_page(user):
             r_date_val = row['date']
             if isinstance(r_date_val, str): r_date_val = datetime.datetime.strptime(r_date_val, '%Y-%m-%d').date()
             is_leave = str(row['project_code']).startswith('LEAVE-')
+            is_holiday = str(row['project_code']).startswith('HOLIDAY')
 
             # Row Container
             if is_leave:
                 st.markdown('<div class="ts-entry-row" style="background-color: #fffbeb; border-left: 4px solid #f59e0b;">', unsafe_allow_html=True)
+            elif is_holiday:
+                st.markdown('<div class="ts-entry-row" style="background-color: #f5f3ff; border-left: 4px solid #8b5cf6;">', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="ts-entry-row">', unsafe_allow_html=True)
             r_col_date, r_col_proj, r_col_emp, r_col_phase, r_col_action = st.columns([1.2, 3.5, 2.0, 1.5, 1.2])
@@ -550,6 +553,8 @@ def render_timesheet_page(user):
                 
                 if is_leave:
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #d97706; background-color: #fef3c7;">{row["project_code"]}</div>', unsafe_allow_html=True)
+                elif is_holiday:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #7c3aed; background-color: #ede9fe; font-weight: bold;">HOLIDAY</div>', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; font-size: 0.8rem; color: #64748b; background-color: #f8fafc;">{row["project_code"]}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -558,10 +563,14 @@ def render_timesheet_page(user):
                 st.markdown('<div class="ts-entry-col" style="border-right: 1px solid #e2e8f0; height: 100%;">', unsafe_allow_html=True)
                 if is_leave:
                     st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px; background-color: #fffbeb;">🏖️ {row["project_name"]} <span style="font-size: 0.65rem; font-weight: bold; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; margin-left: 5px;">LEAVE LOG</span></div>', unsafe_allow_html=True)
+                elif is_holiday:
+                    st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px; background-color: #f5f3ff; color: #6d28d9; font-weight: bold;">🎉 {row["project_name"]} <span style="font-size: 0.65rem; font-weight: bold; color: #6d28d9; background: #ede9fe; padding: 2px 6px; border-radius: 4px; margin-left: 5px;">HOLIDAY</span></div>', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div class="ts-entry-box" title="{row["project_name"]}" style="margin-bottom: 4px;">{row["project_name"]}</div>', unsafe_allow_html=True)
                 
                 comment_val = row.get('comment', '') if pd.notna(row.get('comment')) else '—'
+                if is_holiday and (not comment_val or comment_val == '—'):
+                    comment_val = 'Public Holiday'
                 st.markdown(f'<div class="ts-entry-box" title="{comment_val}" style="font-style: italic; color: #64748b; font-size: 0.8rem; margin-bottom:0;">{comment_val}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             
@@ -571,6 +580,8 @@ def render_timesheet_page(user):
                 
                 if is_leave:
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #d97706;">{row["project_status"]}</div>', unsafe_allow_html=True)
+                elif is_holiday:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #7c3aed; font-weight: 600;">Holiday</div>', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0;">{row["project_status"]}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -580,6 +591,10 @@ def render_timesheet_page(user):
                 if is_leave:
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px; color: #64748b;">Out of Office</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 2px; font-weight: bold; color: #b45309;">{row["hours"]:.2f} hrs</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #ef4444; font-size: 0.65rem; border: none; padding: 0;">🚫 Excluded from export</div>', unsafe_allow_html=True)
+                elif is_holiday:
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 4px; color: #7c3aed;">Full Day Holiday</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="ts-entry-box" style="margin-bottom: 2px; font-weight: bold; color: #6d28d9;">{row["hours"]:.2f} hrs</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="ts-entry-box" style="margin-bottom:0; color: #ef4444; font-size: 0.65rem; border: none; padding: 0;">🚫 Excluded from export</div>', unsafe_allow_html=True)
                 else:
                     p_val = str(row.get("Phase", "1"))
@@ -591,7 +606,17 @@ def render_timesheet_page(user):
             with r_col_action:
                 st.markdown('<div class="ts-entry-col" style="border-right: none; height: 100%; display: flex; align-items: center; justify-content: center;">', unsafe_allow_html=True)
                 # Actions
-                if start_of_week <= r_date_val <= end_of_week:
+                if is_holiday:
+                    # Holiday override action: employee working on holiday can remove it
+                    if st.button(":material/delete:", key=f"del_btn_{row['id']}", help="I worked on this holiday (Remove to log work hours)", disabled=not current_emp_active):
+                        st.toast(f"🗑️ Removing holiday entry for {row['project_name']}...", icon="⏳")
+                        success, err = delete_timesheet_entry(row['id'])
+                        if success:
+                            st.toast("✅ Holiday removed! You can now log your work hours for this date.")
+                        else:
+                            st.toast(f"❌ Failed to remove holiday: {err}", icon="⚠️")
+                        st.rerun()
+                elif start_of_week <= r_date_val <= end_of_week:
                     act_edit, act_del, act_dup = st.columns([1, 1, 1], gap="small")
                     if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Leave" if is_leave else "Edit Record", disabled=not current_emp_active):
                         if is_leave:

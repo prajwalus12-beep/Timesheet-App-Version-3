@@ -4,7 +4,7 @@ import pandas as pd
 import json
 import io
 
-from database.queries import get_all_employees, get_timesheets, get_all_projects
+from database.queries import get_all_employees, get_timesheets, get_all_projects, get_all_holidays
 from utils.date_helpers import get_curr_cycle_dates
 
 def render_reports_page(user):
@@ -95,6 +95,12 @@ def render_reports_page(user):
         all_dates = [r_start + datetime.timedelta(days=i) for i in range(num_days)]
         day_cols = [d.strftime("%d %a").upper() for d in all_dates]
         
+        # Fetch active holidays in this range
+        h_df = get_all_holidays(year=r_start.year)
+        holiday_dates = set()
+        if not h_df.empty:
+            holiday_dates = set(pd.to_datetime(h_df['holiday_date']).dt.date)
+        
         # Build pivot
         pivot_rows = []
         emp_day_hours = {}
@@ -105,7 +111,7 @@ def render_reports_page(user):
                 if eid not in emp_day_hours: emp_day_hours[eid] = {}
                 emp_day_hours[eid][d] = emp_day_hours[eid].get(d, 0) + h
 
-        all_weekdays = [d for d in all_dates if d.weekday() < 5]
+        all_weekdays = [d for d in all_dates if d.weekday() < 5 and d not in holiday_dates]
         for _, emp in all_employees.iterrows():
             eid, ename = emp['employee_id'], emp['employee_name']
             hours = emp_day_hours.get(eid, {})
@@ -191,7 +197,7 @@ def render_reports_page(user):
                 # Excel export for Phase Breakdown
                 if not ts_data.empty:
                     phase_inv_map = {"1": "Analysis", "2": "Design", "3": "Development", "4": "Testing", "5": "Deployment", "6": "Support"}
-                    df_export = ts_data.copy()
+                    df_export = ts_data[~ts_data['project_code'].astype(str).str.startswith(('LEAVE-', 'HOLIDAY'))].copy()
                     df_export['Phase'] = df_export['Phase'].astype(str).map(phase_inv_map).fillna(df_export['Phase'])
                     df_export['hours'] = pd.to_numeric(df_export['hours'], errors='coerce').fillna(0)
                     df_export.rename(columns={'project_name': 'Row Labels', 'Phase': 'Column Labels', 'hours': 'Sum of Hours'}, inplace=True)
@@ -246,10 +252,11 @@ def render_reports_page(user):
                         if eid == 'admin': continue
                         
                         emp_hours_map = emp_day_hours.get(eid, {})
-                        # Identify all incomplete days (h < 8) in the selected range
+                        # Identify all incomplete days (h < 8) in the selected range, skipping weekends and holidays
                         incomplete_dates = []
                         for d in all_dates:
                             if d.weekday() >= 5: continue # Skip Weekends (Sat=5, Sun=6)
+                            if d in holiday_dates: continue # Skip Company Holidays
                             h = emp_hours_map.get(d, 0.0)
                             if h < 8.0:
                                 incomplete_dates.append(d.strftime('%d-%m-%Y'))

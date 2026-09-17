@@ -1,16 +1,26 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from database.queries import get_all_users, update_project_update_access, get_app_setting, set_app_setting
+from database.queries import (
+    get_all_users, update_project_update_access, get_app_setting, set_app_setting,
+    get_all_holidays
+)
 from utils.lockout_helpers import get_lockout_schedule, save_lockout_schedule
+from components.dialogs import (
+    add_holiday_dialog, edit_holiday_dialog, import_holiday_dialog, confirm_delete_holiday_dialog
+)
 
-def render_settings_page():
-    """Render the administrative settings page for access control."""
+def render_settings_page(user=None):
+    """Render the administrative settings page for access control and holiday management."""
+    if user is None:
+        user = st.session_state.get('user', {})
+        
     st.subheader("System Settings", divider="blue")
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🗓️ Weekly Lockout Schedule", 
         "👥 Employee Permissions", 
-        "📧 Timesheet Reminder Settings"
+        "📧 Timesheet Reminder Settings",
+        "🏖️ Holiday Management"
     ])
     
     with tab1:
@@ -280,4 +290,107 @@ def render_settings_page():
             "every 4 weeks during nighttime hours (02:00). "
             "This setting is managed by the system and cannot be changed."
         )
+
+    with tab4:
+        # --- Holiday Management (Admin-only) ---
+        st.write("### 🏖️ Holiday Management")
+        st.caption("Configure company-wide holidays applicable to all employees. Add manually or import via Excel/CSV.")
+
+        curr_year = datetime.date.today().year
+        year_options = ["All", str(curr_year - 1), str(curr_year), str(curr_year + 1), str(curr_year + 2)]
+        
+        col_y, col_space, col_add, col_imp = st.columns([1.5, 3.2, 1.6, 1.7])
+        with col_y:
+            sel_year = st.selectbox("Filter by Year", year_options, index=2, key="holiday_year_filter")
+        with col_add:
+            st.write("")
+            st.write("")
+            if st.button("➕ Add Holiday", type="primary", use_container_width=True, key="open_add_holiday_btn"):
+                add_holiday_dialog(user)
+        with col_imp:
+            st.write("")
+            st.write("")
+            if st.button("📥 Import Holidays", type="secondary", use_container_width=True, key="open_import_holiday_btn"):
+                import_holiday_dialog(user)
+
+        filter_year = None if sel_year == "All" else int(sel_year)
+        holidays_df = get_all_holidays(year=filter_year)
+
+        if holidays_df.empty:
+            st.info("ℹ️ No holidays configured for the selected filter. Click **'Add Holiday'** or **'Import Holidays'** to configure dates.")
+        else:
+            st.markdown(f"**Total Holidays:** {len(holidays_df)}")
+            
+            st.markdown("""
+            <style>
+            .holiday-card {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 16px;
+                background: rgba(128, 128, 128, 0.05);
+                border-left: 4px solid #8b5cf6;
+                border-radius: 8px;
+                margin-bottom: 8px;
+            }
+            .holiday-date-badge {
+                font-weight: 700;
+                font-size: 15px;
+                color: #2563eb;
+            }
+            .holiday-day-label {
+                font-size: 12px;
+                color: #64748b;
+                margin-left: 6px;
+            }
+            .holiday-name-text {
+                font-size: 15px;
+                font-weight: 600;
+                margin-top: 2px;
+            }
+            .holiday-audit-text {
+                font-size: 12px;
+                color: #94a3b8;
+                margin-top: 2px;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+            for _, h_row in holidays_df.iterrows():
+                h_date_raw = h_row['holiday_date']
+                if isinstance(h_date_raw, str):
+                    try:
+                        h_date_obj = datetime.date.fromisoformat(h_date_raw)
+                    except Exception:
+                        h_date_obj = h_date_raw
+                else:
+                    h_date_obj = h_date_raw
+
+                date_str = h_date_obj.strftime("%d-%m-%Y") if hasattr(h_date_obj, 'strftime') else str(h_date_obj)
+                day_str = h_date_obj.strftime("%A") if hasattr(h_date_obj, 'strftime') else ""
+
+                card_col, action_col = st.columns([5.5, 1.5])
+                with card_col:
+                    st.markdown(f"""
+                    <div class="holiday-card">
+                        <div>
+                            <div>
+                                <span class="holiday-date-badge">📅 {date_str}</span>
+                                <span class="holiday-day-label">({day_str})</span>
+                            </div>
+                            <div class="holiday-name-text">🎉 {h_row['holiday_name']}</div>
+                            <div class="holiday-audit-text">Configured by: @{h_row.get('created_by') or 'admin'}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with action_col:
+                    st.write("")
+                    act_c1, act_c2 = st.columns(2)
+                    with act_c1:
+                        if st.button(":material/edit:", key=f"edit_h_btn_{h_row['id']}", help="Edit Holiday"):
+                            edit_holiday_dialog(h_row.to_dict(), user)
+                    with act_c2:
+                        if st.button(":material/delete:", key=f"del_h_btn_{h_row['id']}", help="Delete Holiday"):
+                            confirm_delete_holiday_dialog(h_row.to_dict(), user)
+
 

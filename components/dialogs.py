@@ -4,7 +4,11 @@ import time
 import json
 import pandas as pd
 import streamlit.components.v1 as components
-from database.queries import get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password, update_user_password, has_leave_for_date, add_leave_entries
+from database.queries import (
+    get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password,
+    update_user_password, has_leave_for_date, add_leave_entries,
+    add_holiday, update_holiday, delete_holiday, import_holidays
+)
 from services.auth_service import is_password_strong, encrypt_data
 
 def format_proj_key(code, name, max_len=40):
@@ -569,3 +573,152 @@ def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
                 st.rerun()
             else:
                 st.error(f"❌ Failed to update leave: {err}")
+
+
+# ==============================================================================
+# Holiday Dialogs
+# ==============================================================================
+
+@st.dialog("Add New Holiday")
+def add_holiday_dialog(user=None):
+    """Dialog for administrative creation of a new holiday."""
+    st.markdown("Enter the holiday details below. Configured holidays apply to **all employees**.")
+    
+    col_d, col_n = st.columns([1.2, 2.0])
+    with col_d:
+        h_date = st.date_input("Holiday Date", value=datetime.date.today(), format="DD-MM-YYYY", key="add_h_date_input")
+    with col_n:
+        h_name = st.text_input("Holiday Name", placeholder="e.g. Gandhi Jayanti", max_chars=255, key="add_h_name_input")
+        
+    st.caption("ℹ️ A unique constraint prevents duplicate holidays on the same date.")
+    
+    col_save, col_cancel = st.columns(2)
+    with col_save:
+        if st.button("💾 Save Holiday", type="primary", use_container_width=True, key="save_add_holiday_btn"):
+            if not h_name.strip():
+                st.error("❌ Holiday Name is required.")
+                st.stop()
+                
+            creator = (user.get('employee_id') or user.get('username', 'admin')) if user else 'admin'
+            with st.spinner("Saving holiday..."):
+                success, msg = add_holiday(h_date, h_name.strip(), created_by=creator)
+                if success:
+                    st.toast(f"✅ Holiday '{h_name.strip()}' added successfully!", icon="🏖️")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+
+
+@st.dialog("Edit Holiday")
+def edit_holiday_dialog(holiday_data, user=None):
+    """Dialog for editing an existing holiday."""
+    st.markdown(f"Editing holiday: **{holiday_data.get('holiday_name')}**")
+    
+    current_date_val = holiday_data.get('holiday_date')
+    if isinstance(current_date_val, str):
+        try:
+            current_date_val = datetime.date.fromisoformat(current_date_val)
+        except Exception:
+            current_date_val = datetime.date.today()
+            
+    col_d, col_n = st.columns([1.2, 2.0])
+    with col_d:
+        new_date = st.date_input("Holiday Date", value=current_date_val, format="DD-MM-YYYY", key=f"edit_h_date_{holiday_data['id']}")
+    with col_n:
+        new_name = st.text_input("Holiday Name", value=holiday_data.get('holiday_name', ''), max_chars=255, key=f"edit_h_name_{holiday_data['id']}")
+        
+    col_update, col_cancel = st.columns(2)
+    with col_update:
+        if st.button("💾 Update Holiday", type="primary", use_container_width=True, key=f"update_h_btn_{holiday_data['id']}"):
+            if not new_name.strip():
+                st.error("❌ Holiday Name is required.")
+                st.stop()
+                
+            updater = (user.get('employee_id') or user.get('username', 'admin')) if user else 'admin'
+            with st.spinner("Updating holiday..."):
+                success, msg = update_holiday(holiday_data['id'], new_date, new_name.strip(), updated_by=updater)
+                if success:
+                    st.toast(f"✅ Holiday updated successfully!", icon="🏖️")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+
+
+@st.dialog("Import Holiday Sheet", width="large")
+def import_holiday_dialog(user=None):
+    """Dialog for importing a holiday file (.xlsx, .xls, .csv)."""
+    st.markdown("Upload an Excel or CSV file containing configured company holidays.")
+    st.caption("Required columns: `date` and `holiday name`.")
+    
+    from utils.xlsx_export import build_clean_xlsx
+    
+    # Download sample template
+    sample_df = pd.DataFrame([
+        ["2026-10-02", "Gandhi Jayanti"],
+        ["2026-12-25", "Christmas"]
+    ], columns=['date', 'holiday name'])
+    sample_bytes = build_clean_xlsx(sample_df, sheet_name="Holidays")
+    
+    col_down, _ = st.columns([1.5, 2.5])
+    with col_down:
+        st.download_button(
+            "📥 Download Sample Template", 
+            sample_bytes, 
+            "sample_holidays.xlsx", 
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            use_container_width=True,
+            key="dl_sample_holiday_btn"
+        )
+    
+    st.divider()
+    
+    uploaded_file = st.file_uploader("Choose Holiday Sheet", type=["xlsx", "xls", "csv"], key="import_holiday_uploader")
+    
+    if uploaded_file:
+        from pages.import_page import read_excel_or_csv
+        try:
+            df = read_excel_or_csv(uploaded_file)
+            st.write(f"📄 **File preview:** ({len(df)} rows detected)")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            if st.button("🚀 Import Holidays", type="primary", use_container_width=True, key="exec_import_holiday_btn"):
+                creator = (user.get('employee_id') or user.get('username', 'admin')) if user else 'admin'
+                with st.spinner("Validating and importing holidays..."):
+                    success, msg, details = import_holidays(df, created_by=creator)
+                    if success:
+                        st.toast(f"✅ {msg}", icon="🎉")
+                        time.sleep(1.0)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
+                        if "errors" in details:
+                            with st.expander("🔍 View Row-Level Validation Errors", expanded=True):
+                                for err in details["errors"]:
+                                    st.markdown(f"- {err}")
+        except Exception as e:
+            st.error(f"❌ Could not read file: {e}")
+
+
+@st.dialog("Confirm Delete Holiday")
+def confirm_delete_holiday_dialog(holiday_data, user=None):
+    """Confirmation modal before deleting a holiday."""
+    h_name = holiday_data.get('holiday_name')
+    h_date = holiday_data.get('holiday_date')
+    st.warning(f"Are you sure you want to delete the holiday **{h_name}** on **{h_date}**?")
+    st.info("ℹ️ Once deleted, this holiday will no longer appear on employee timesheets. Historical timesheet work logs remain unaffected.")
+    
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("🗑️ Yes, Delete", type="primary", use_container_width=True, key=f"confirm_del_h_{holiday_data['id']}"):
+            updater = (user.get('employee_id') or user.get('username', 'admin')) if user else 'admin'
+            with st.spinner("Deleting holiday..."):
+                success, msg = delete_holiday(holiday_data['id'], soft_delete=True, updated_by=updater)
+                if success:
+                    st.toast(f"✅ Holiday '{h_name}' deleted.", icon="🗑️")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+    with col_no:
+        if st.button("Cancel", use_container_width=True, key=f"cancel_del_h_{holiday_data['id']}"):
+            st.rerun()
+

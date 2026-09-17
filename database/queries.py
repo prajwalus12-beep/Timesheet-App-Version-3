@@ -140,6 +140,11 @@ def add_timesheet_entry(emp_id, emp_name, project_code, project_name, date, hour
     if not str(project_code).startswith("LEAVE-") and has_leave_for_date(emp_id, date_str):
         return False, "This date is registered as approved leave. Standard work hours cannot be logged for leave dates."
 
+    if not str(project_code).startswith("LEAVE-") and not str(project_code).startswith("HOLIDAY"):
+        is_holiday, h_info = has_active_holiday_for_date(emp_id, date_str)
+        if is_holiday:
+            return False, f"This date ({date_str}) is configured as a Holiday ('{h_info['holiday_name']}'). If you worked on this day, please remove the holiday entry from your timesheet first."
+
     if str(project_code).startswith("LEAVE-"):
         ensure_leave_projects_exist()
 
@@ -255,8 +260,8 @@ def add_leave_entries(emp_id, emp_name, leave_type_str, start_date, end_date, re
         return False, "; ".join(errors)
     return True, f"Successfully added {success_count} leave days."
 
-def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=None):
-    """Fetch timesheet entries with optional filters using Supabase SDK."""
+def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=None, include_holidays=True):
+    """Fetch timesheet entries with optional filters using Supabase SDK, dynamically merging holidays."""
     supabase = get_supabase_client()
     if not supabase: return pd.DataFrame()
     
@@ -270,12 +275,16 @@ def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=Non
     res = query.order('date', desc=True).execute()
     data = res.data or []
     
-    if not data: return pd.DataFrame()
-    
-    # Decrypt project names
     cols = ['id', 'emp_id', 'emp_name', 'project_code', 'project_name', 'date', 'hours', 'Phase', 'project_status', 'comment']
     rows = []
+    
+    logged_dates_by_emp = {}
     for r in data:
+        eid = str(r['emp_id'])
+        d_val = str(r['date'])
+        if eid not in logged_dates_by_emp: logged_dates_by_emp[eid] = set()
+        logged_dates_by_emp[eid].add(d_val)
+        
         rows.append([
             r['id'],
             r['emp_id'],
@@ -289,13 +298,82 @@ def get_timesheets(start_date=None, end_date=None, emp_id=None, project_code=Non
             r.get('comment', '')
         ])
     
+    # Dynamically inject holidays if requested.
+    # Only skip if project_code filter is set to a specific non-holiday project (not a LEAVE/HOLIDAY prefix).
+    _pc_str = str(project_code) if project_code is not None else ''
+    _is_non_holiday_filter = project_code is not None and not _pc_str.startswith('HOLIDAY') and not _pc_str.startswith('LEAVE-')
+    if include_holidays and not _is_non_holiday_filter:
+        try:
+            h_query = supabase.table('holidays').select('id, holiday_date, holiday_name').is_('deleted_at', 'null')
+            if start_date: h_query = h_query.gte('holiday_date', start_date.isoformat() if hasattr(start_date, 'isoformat') else start_date)
+            if end_date: h_query = h_query.lte('holiday_date', end_date.isoformat() if hasattr(end_date, 'isoformat') else end_date)
+            h_res = h_query.execute()
+            holidays = h_res.data or []
+            
+            if holidays:
+                if emp_id:
+                    emp_row = get_employee_by_id(emp_id)
+                    emp_name = emp_row.get('employee_name', str(emp_id)) if emp_row else str(emp_id)
+                    emp_list = [{'employee_id': str(emp_id), 'employee_name': emp_name}]
+                else:
+                    emp_df = get_all_employees(exclude_admin=True)
+                    # Only synthesize holidays for ACTIVE employees (status == 1)
+                    if 'status' in emp_df.columns:
+                        emp_df = emp_df[emp_df['status'].astype(int) == 1]
+                    emp_list = emp_df[['employee_id', 'employee_name']].to_dict('records') if not emp_df.empty else []
+                    
+                holiday_ids = [h['id'] for h in holidays]
+                ex_res = supabase.table('employee_holiday_exclusions').select('employee_id, holiday_id').in_('holiday_id', holiday_ids).execute()
+                exclusions_set = {(str(r['employee_id']), int(r['holiday_id'])) for r in (ex_res.data or [])}
+                
+                for h in holidays:
+                    h_id = int(h['id'])
+                    h_date = str(h['holiday_date'])
+                    h_name = str(h['holiday_name'])
+                    
+                    for emp in emp_list:
+                        e_id = str(emp['employee_id'])
+                        if e_id == 'admin': continue
+                        
+                        if (e_id, h_id) in exclusions_set:
+                            continue
+                            
+                        # If employee already has a real entry on this date, skip holiday
+                        if e_id in logged_dates_by_emp and h_date in logged_dates_by_emp[e_id]:
+                            continue
+                            
+                        rows.append([
+                            f"HOLIDAY-{h_id}-{e_id}",
+                            e_id,
+                            emp['employee_name'],
+                            f"HOLIDAY-{h_id}",
+                            h_name,
+                            h_date,
+                            8.0,
+                            "Holiday",
+                            "Holiday",
+                            "Company Holiday"
+                        ])
+        except Exception as ex:
+            print(f"Error synthesizing holiday entries: {ex}")
+            
     return pd.DataFrame(rows, columns=cols)
 
 def delete_timesheet_entry(entry_id):
-    """Delete a timesheet entry using Supabase SDK."""
+    """Delete a timesheet entry using Supabase SDK, supporting holiday exclusion."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
     
+    # Handle virtual holiday deletion (employee self-service override)
+    if str(entry_id).startswith("HOLIDAY-"):
+        try:
+            parts = str(entry_id).split("-")
+            h_id = int(parts[1])
+            e_id = parts[2] if len(parts) > 2 else None
+            return exclude_holiday_for_employee(e_id, h_id)
+        except Exception as e:
+            return False, str(e)
+            
     try:
         res = supabase.table('timesheet').select('emp_id').eq('id', entry_id).execute()
         if res.data:
@@ -321,6 +399,11 @@ def update_timesheet_entry(entry_id, emp_id, emp_name, project_code, project_nam
     # We only block if the project being updated IS NOT a leave entry itself
     if not str(project_code).startswith("LEAVE-") and has_leave_for_date(emp_id, date_str):
         return False, "This date is registered as approved leave. Standard work hours cannot be logged for leave dates."
+
+    if not str(project_code).startswith("LEAVE-") and not str(project_code).startswith("HOLIDAY"):
+        is_holiday, h_info = has_active_holiday_for_date(emp_id, date_str)
+        if is_holiday:
+            return False, f"This date ({date_str}) is configured as a Holiday ('{h_info['holiday_name']}'). If you worked on this day, please remove the holiday entry from your timesheet first."
 
     if str(project_code).startswith("LEAVE-"):
         ensure_leave_projects_exist()
@@ -1301,3 +1384,340 @@ def cleanup_old_reminder_logs():
     except Exception as e:
         print(f"Error cleaning up old ts reminder logs: {e}")
     return 0
+
+
+# ==============================================================================
+# Holiday Management & Employee Holiday Exclusion Functions
+# ==============================================================================
+
+def get_all_holidays(year=None, include_inactive=False):
+    """Fetch configured holidays using Supabase SDK."""
+    supabase = get_supabase_client()
+    if not supabase: return pd.DataFrame(columns=['id', 'holiday_date', 'holiday_name', 'created_at', 'created_by'])
+    
+    try:
+        query = supabase.table('holidays').select('id, holiday_date, holiday_name, is_active, created_at, created_by, deleted_at')
+        if not include_inactive:
+            query = query.is_('deleted_at', 'null')
+        if year and str(year).strip().lower() != 'all':
+            query = query.gte('holiday_date', f"{year}-01-01").lte('holiday_date', f"{year}-12-31")
+            
+        res = query.order('holiday_date', desc=False).execute()
+        data = res.data or []
+        return pd.DataFrame(data)
+    except Exception as e:
+        print(f"Error fetching holidays: {e}")
+        return pd.DataFrame(columns=['id', 'holiday_date', 'holiday_name', 'created_at', 'created_by'])
+
+def ensure_holiday_project_exists(holiday_id, holiday_name):
+    """Ensure a HOLIDAY-{id} project record exists in the project table (needed as FK for timesheet)."""
+    supabase = get_supabase_client()
+    if not supabase: return
+    project_code = f"HOLIDAY-{holiday_id}"
+    try:
+        supabase.table('project').upsert([{
+            "project_code": project_code,
+            "project_name": encrypt_data(str(holiday_name)),
+            "status": "Holiday"
+        }], on_conflict='project_code').execute()
+    except Exception as e:
+        print(f"ensure_holiday_project_exists error: {e}")
+
+def create_holiday_timesheet_entries(holiday_date, holiday_name, holiday_id, created_by='admin'):
+    """
+    Physically insert a timesheet row in the `timesheet` table for every active employee
+    who does not already have any entry on `holiday_date`.
+    Returns (created_count, skipped_count).
+    """
+    supabase = get_supabase_client()
+    if not supabase: return 0, 0
+
+    date_str = holiday_date.isoformat() if hasattr(holiday_date, 'isoformat') else str(holiday_date)
+    project_code = f"HOLIDAY-{holiday_id}"
+
+    # Guarantee project FK exists
+    ensure_holiday_project_exists(holiday_id, holiday_name)
+
+    # Fetch all active employees (excludes admin row)
+    emp_df = get_all_employees(exclude_admin=True)
+    if 'status' in emp_df.columns:
+        emp_df = emp_df[emp_df['status'].astype(int) == 1]
+    if emp_df.empty:
+        return 0, 0
+
+    # Find employees who already have ANY entry on this date
+    try:
+        existing_res = supabase.table('timesheet').select('emp_id').eq('date', date_str).execute()
+        existing_emps = {str(r['emp_id']) for r in (existing_res.data or [])}
+    except Exception:
+        existing_emps = set()
+
+    records = []
+    skipped = 0
+    for _, emp_row in emp_df.iterrows():
+        e_id = str(emp_row['employee_id'])
+        if e_id in existing_emps:
+            skipped += 1
+            continue
+        records.append({
+            "emp_id": e_id,
+            "emp_name": emp_row['employee_name'],
+            "project_code": project_code,
+            "project_name": encrypt_data(str(holiday_name)),
+            "date": date_str,
+            "hours": 8.0,
+            "Phase": "Holiday",
+            "project_status": "Holiday",
+            "comment": "Company Holiday"
+        })
+
+    if records:
+        try:
+            supabase.table('timesheet').insert(records).execute()
+            print(f"create_holiday_timesheet_entries: inserted {len(records)} rows for '{holiday_name}' on {date_str}")
+        except Exception as e:
+            print(f"create_holiday_timesheet_entries insert error: {e}")
+            return 0, skipped
+
+    return len(records), skipped
+
+def add_holiday(holiday_date, holiday_name, created_by='admin'):
+    """Add a new holiday. Enforces date uniqueness for active holidays."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    date_str = holiday_date.isoformat() if hasattr(holiday_date, 'isoformat') else str(holiday_date).strip()
+    name_str = str(holiday_name).strip()
+    
+    if not date_str:
+        return False, "Holiday date is required."
+    if not name_str:
+        return False, "Holiday name is required."
+    if len(name_str) > 255:
+        return False, "Holiday name cannot exceed 255 characters."
+        
+    try:
+        res = supabase.table('holidays').select('id, holiday_name').eq('holiday_date', date_str).is_('deleted_at', 'null').execute()
+        if res.data:
+            existing = res.data[0]
+            return False, f"A holiday ('{existing['holiday_name']}') already exists on {date_str}."
+            
+        data = {
+            "holiday_date": date_str,
+            "holiday_name": name_str,
+            "is_active": True,
+            "created_by": created_by
+        }
+        insert_result = supabase.table('holidays').insert(data).execute()
+        h_id = insert_result.data[0]['id'] if insert_result.data else None
+        msg = "Holiday added successfully."
+        if h_id:
+            created_cnt, skipped_cnt = create_holiday_timesheet_entries(date_str, name_str, h_id, created_by)
+            msg = f"Holiday added. Timesheet entries created for {created_cnt} employee(s) ({skipped_cnt} already had entries for this date)."
+        return True, msg
+    except Exception as e:
+        return False, str(e)
+
+def update_holiday(holiday_id, holiday_date, holiday_name, updated_by='admin'):
+    """Update an existing holiday date and name."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    
+    date_str = holiday_date.isoformat() if hasattr(holiday_date, 'isoformat') else str(holiday_date).strip()
+    name_str = str(holiday_name).strip()
+    
+    if not date_str: return False, "Holiday date is required."
+    if not name_str: return False, "Holiday name is required."
+    if len(name_str) > 255: return False, "Holiday name cannot exceed 255 characters."
+    
+    try:
+        res = supabase.table('holidays').select('id').eq('holiday_date', date_str).neq('id', holiday_id).is_('deleted_at', 'null').execute()
+        if res.data:
+            return False, f"Another holiday already exists on {date_str}."
+            
+        data = {
+            "holiday_date": date_str,
+            "holiday_name": name_str,
+            "updated_by": updated_by
+        }
+        supabase.table('holidays').update(data).eq('id', holiday_id).execute()
+        return True, "Holiday updated successfully."
+    except Exception as e:
+        return False, str(e)
+
+def delete_holiday(holiday_id, soft_delete=True, updated_by='admin'):
+    """Delete a holiday. Soft-deletes by default to preserve historical integrity.
+    Also removes the physical timesheet rows that were created for this holiday.
+    """
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+
+    project_code = f"HOLIDAY-{holiday_id}"
+
+    try:
+        # Remove physical timesheet entries for this holiday from the timesheet table
+        try:
+            supabase.table('timesheet').delete().eq('project_code', project_code).execute()
+        except Exception as ts_err:
+            print(f"delete_holiday: could not remove timesheet rows for {project_code}: {ts_err}")
+
+        if soft_delete:
+            import datetime as _dt
+            now_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            supabase.table('holidays').update({
+                'is_active': False,
+                'deleted_at': now_iso,
+                'updated_by': updated_by
+            }).eq('id', holiday_id).execute()
+        else:
+            supabase.table('holidays').delete().eq('id', holiday_id).execute()
+        return True, "Holiday deleted successfully."
+    except Exception as e:
+        return False, str(e)
+
+def import_holidays(df, created_by='admin'):
+    """Import holidays from DataFrame with columns 'date' and 'holiday name'."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error", {}
+    
+    col_map = {str(c).strip().lower(): c for c in df.columns}
+    required = ['date', 'holiday name']
+    for r in required:
+        if r not in col_map:
+            return False, f"Missing required column: '{r}'. Expected 'date' and 'holiday name'.", {}
+            
+    valid_records = []
+    seen_dates = set()
+    errors = []
+    
+    for idx, row in df.iterrows():
+        row_num = idx + 2
+        raw_date = row[col_map['date']]
+        raw_name = row[col_map['holiday name']]
+        
+        if (pd.isna(raw_date) or str(raw_date).strip() == "") and (pd.isna(raw_name) or str(raw_name).strip() == ""):
+            continue
+            
+        parsed_date = _parse_date_value(raw_date)
+        is_valid_date = False
+        if parsed_date:
+            try:
+                import datetime as _dt
+                _dt.date.fromisoformat(str(parsed_date))
+                is_valid_date = True
+            except Exception:
+                is_valid_date = False
+                
+        if not is_valid_date:
+            errors.append(f"Row {row_num}: Invalid or missing date '{raw_date}'.")
+            continue
+            
+        name_str = str(raw_name).strip() if pd.notna(raw_name) else ""
+        if not name_str:
+            errors.append(f"Row {row_num}: Missing holiday name.")
+            continue
+        if len(name_str) > 255:
+            errors.append(f"Row {row_num}: Holiday name exceeds 255 characters.")
+            continue
+            
+        if parsed_date in seen_dates:
+            errors.append(f"Row {row_num}: Duplicate date '{parsed_date}' within uploaded file.")
+            continue
+        seen_dates.add(parsed_date)
+        
+        valid_records.append({
+            "holiday_date": parsed_date,
+            "holiday_name": name_str,
+            "is_active": True,
+            "created_by": created_by
+        })
+        
+    if errors:
+        return False, f"Validation failed with {len(errors)} error(s).", {"errors": errors, "valid_count": len(valid_records)}
+        
+    if not valid_records:
+        return False, "No valid holiday records found in file.", {}
+        
+    dates_to_check = [r['holiday_date'] for r in valid_records]
+    try:
+        existing_res = supabase.table('holidays').select('holiday_date, holiday_name').in_('holiday_date', dates_to_check).is_('deleted_at', 'null').execute()
+        if existing_res.data:
+            db_conflicts = [f"{r['holiday_date']} ({r['holiday_name']})" for r in existing_res.data]
+            return False, f"Import rejected: {len(db_conflicts)} date(s) already exist in system: {', '.join(db_conflicts[:5])}{'...' if len(db_conflicts) > 5 else ''}", {"conflicts": db_conflicts}
+            
+        insert_result = supabase.table('holidays').insert(valid_records).execute()
+        inserted_holidays = insert_result.data or []
+
+        # Physically create timesheet rows for every active employee for each inserted holiday
+        total_ts_created = 0
+        for h in inserted_holidays:
+            h_id = h.get('id')
+            h_date = h.get('holiday_date')
+            h_name = h.get('holiday_name')
+            if h_id and h_date and h_name:
+                cnt, _ = create_holiday_timesheet_entries(h_date, h_name, h_id, created_by)
+                total_ts_created += cnt
+
+        # Fallback: if Supabase didn't return inserted rows, fetch by dates
+        if not inserted_holidays:
+            fallback_res = supabase.table('holidays').select('id, holiday_date, holiday_name').in_('holiday_date', dates_to_check).is_('deleted_at', 'null').execute()
+            for h in (fallback_res.data or []):
+                h_id = h.get('id')
+                h_date = h.get('holiday_date')
+                h_name = h.get('holiday_name')
+                if h_id and h_date and h_name:
+                    cnt, _ = create_holiday_timesheet_entries(h_date, h_name, h_id, created_by)
+                    total_ts_created += cnt
+
+        return True, f"Successfully imported {len(valid_records)} holiday(s). Timesheet entries created for {total_ts_created} employee-holiday combinations.", {"imported_count": len(valid_records), "ts_created": total_ts_created}
+    except Exception as e:
+        return False, f"Database error during import: {str(e)}", {}
+
+def get_employee_holiday_exclusions(emp_id):
+    """Fetch all holiday_ids excluded by employee."""
+    supabase = get_supabase_client()
+    if not supabase or not emp_id: return set()
+    
+    try:
+        res = supabase.table('employee_holiday_exclusions').select('holiday_id').eq('employee_id', str(emp_id)).execute()
+        return {int(r['holiday_id']) for r in (res.data or [])}
+    except Exception:
+        return set()
+
+def exclude_holiday_for_employee(emp_id, holiday_id, created_by=None):
+    """Exclude a holiday for an employee so they can record work hours."""
+    supabase = get_supabase_client()
+    if not supabase: return False, "Configuration error"
+    if not emp_id or not holiday_id: return False, "Employee ID and Holiday ID are required."
+    
+    try:
+        supabase.table('employee_holiday_exclusions').upsert({
+            "employee_id": str(emp_id),
+            "holiday_id": int(holiday_id),
+            "created_by": str(created_by or emp_id)
+        }, on_conflict='employee_id, holiday_id').execute()
+        return True, "Holiday entry removed from your timesheet. You may now log your work hours."
+    except Exception as e:
+        return False, str(e)
+
+def has_active_holiday_for_date(emp_id, date):
+    """Check if a date has an active un-excluded holiday for this employee."""
+    supabase = get_supabase_client()
+    if not supabase: return False, None
+    date_str = date.isoformat() if hasattr(date, 'isoformat') else str(date)
+    
+    try:
+        res = supabase.table('holidays').select('id, holiday_name').eq('holiday_date', date_str).is_('deleted_at', 'null').execute()
+        if not res.data:
+            return False, None
+        holiday = res.data[0]
+        
+        if emp_id:
+            ex_res = supabase.table('employee_holiday_exclusions').select('id').eq('employee_id', str(emp_id)).eq('holiday_id', holiday['id']).execute()
+            if ex_res.data:
+                return False, None
+                
+        return True, holiday
+    except Exception:
+        return False, None
+

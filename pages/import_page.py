@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from database.queries import import_employees, import_projects, import_assignments, import_project_updates
+from database.queries import import_employees, import_projects, import_assignments, import_project_updates, import_holidays
 from utils.xlsx_export import build_clean_xlsx
 
 def get_excel_download(df):
@@ -100,4 +100,30 @@ def render_import_page():
         )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.info("Required: 'Job No', 'Job Priority' (numeric), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS).")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Row 3: Holiday Import ---
+    col_holiday, col_blank = st.columns(2)
+    with col_holiday:
+        st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
+        st.write("### 🏖️ Holidays")
+        uploaded_file = st.file_uploader("Upload Holidays File", type=["xls", "xlsx", "csv"], key="holiday_csv")
+        if uploaded_file:
+            df = read_excel_or_csv(uploaded_file)
+            if st.button("Import Holidays", type="primary"):
+                success, msg, details = import_holidays(df)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+                    if "errors" in details:
+                        with st.expander("🔍 View Row-Level Validation Errors", expanded=True):
+                            for err in details["errors"]:
+                                st.markdown(f"- {err}")
+        sample_holiday = pd.DataFrame(
+            [["2026-10-02", "Gandhi Jayanti"], ["2026-12-25", "Christmas"]],
+            columns=['date', 'holiday name']
+        )
+        st.download_button("📥 Sample Holiday Excel", get_excel_download(sample_holiday), "sample_holidays.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.info("Required: 'date' (YYYY-MM-DD or DD-MM-YYYY), 'holiday name'. Holidays apply automatically to all active employees.")
         st.markdown('</div>', unsafe_allow_html=True)

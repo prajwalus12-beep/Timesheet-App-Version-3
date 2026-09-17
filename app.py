@@ -71,4 +71,4 @@ else:
     elif page == "Reports": render_reports_page(user)
     elif page == "Import Data": render_import_page()
     elif page == "Project Update": render_project_update_page_v2(user)
-    elif page == "Settings": render_settings_page()
+    elif page == "Settings": render_settings_page(user)
