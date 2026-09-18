@@ -45,6 +45,29 @@ def _round_actual_days(v):
     except (ValueError, TypeError):
         return v
 
+
+def _format_checkbox_value(v):
+    """Format checkbox value to boolean string for Excel export:
+    - Checked on UI (None / NaN / empty string / True / 0)  -> 'TRUE'
+    - Unchecked on UI (1 / '1' / 1.0 / '1.0' / False)     -> 'FALSE'
+    """
+    if pd.isna(v) or v is None:
+        return 'TRUE'
+    if isinstance(v, bool):
+        return 'TRUE' if v else 'FALSE'
+    s = str(v).strip().lower()
+    if s in ('1', '1.0', 'false', 'no', 'unchecked'):
+        return 'FALSE'
+    if s in ('nan', 'none', 'nat', '', '0', '0.0', 'true', 'yes', 'checked'):
+        return 'TRUE'
+    try:
+        if float(s) == 1.0:
+            return 'FALSE'
+    except (ValueError, TypeError):
+        pass
+    return 'TRUE'
+
+
 def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=False):
     """Generate an Excel buffer for the given DataFrame.
 
@@ -154,6 +177,12 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         clean_df['project_code'] = clean_df['project_code'].apply(_to_numeric_where_possible)
     if 'lead_engineer' in clean_df.columns:
         clean_df['lead_engineer'] = clean_df['lead_engineer'].apply(_to_numeric_where_possible)
+
+    # ── Format Checkbox columns as explicit 'TRUE' / 'FALSE' strings ────────
+    checkbox_cols = ['checkbox_bc', 'checkbox_trello', 'checkbox_wa', 'checkbox_ws']
+    for cb_col in checkbox_cols:
+        if cb_col in clean_df.columns:
+            clean_df[cb_col] = clean_df[cb_col].apply(_format_checkbox_value)
 
     export_cols_keys = [k for k in export_cols_map.keys() if k in clean_df.columns]
 

@@ -41,6 +41,8 @@ def render_reports_page(user):
         
         with c1:
             report_emps = get_all_employees(exclude_admin=True)
+            if 'status' in report_emps.columns:
+                report_emps = report_emps[report_emps['status'].astype(int) == 1]
             report_emp_options = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in report_emps.iterrows()}
             sel_emp_name = st.selectbox("Employee", ["All Employees"] + list(report_emp_options.keys()), key="report_emp")
             sel_emp_id = report_emp_options[sel_emp_name] if sel_emp_name != "All Employees" else None
@@ -87,6 +89,8 @@ def render_reports_page(user):
                 st.rerun()
 
     all_employees = get_all_employees(exclude_admin=True)
+    if 'status' in all_employees.columns:
+        all_employees = all_employees[all_employees['status'].astype(int) == 1]
     if sel_emp_id: all_employees = all_employees[all_employees['employee_id'] == sel_emp_id]
     ts_data = get_timesheets(r_start, r_end, sel_emp_id, sel_proj_code)
 
@@ -96,38 +100,87 @@ def render_reports_page(user):
         day_cols = [d.strftime("%d %a").upper() for d in all_dates]
         
         # Fetch active holidays in this range
-        h_df = get_all_holidays(year=r_start.year)
-        holiday_dates = set()
+        h_df = get_all_holidays()
+        holiday_date_map = {}
         if not h_df.empty:
-            holiday_dates = set(pd.to_datetime(h_df['holiday_date']).dt.date)
+            h_df['_hdate'] = pd.to_datetime(h_df['holiday_date']).dt.date
+            h_in_range = h_df[(h_df['_hdate'] >= r_start) & (h_df['_hdate'] <= r_end)]
+            holiday_date_map = {row['_hdate']: str(row['holiday_name']) for _, row in h_in_range.iterrows()}
+        holiday_dates = set(holiday_date_map.keys())
         
         # Build pivot
         pivot_rows = []
-        emp_day_hours = {}
+        emp_day_data = {}
         if not ts_data.empty:
             ts_data['date'] = pd.to_datetime(ts_data['date']).dt.date
             for _, row in ts_data.iterrows():
-                eid, d, h = row['emp_id'], row['date'], float(row['hours'])
-                if eid not in emp_day_hours: emp_day_hours[eid] = {}
-                emp_day_hours[eid][d] = emp_day_hours[eid].get(d, 0) + h
+                eid = str(row['emp_id'])
+                d = row['date']
+                p_code = str(row.get('project_code', '')).strip()
+                p_name = str(row.get('project_name', '')).strip()
+                p_status = str(row.get('project_status', '')).strip()
+                p_phase = str(row.get('Phase', '')).strip()
+                try:
+                    h = float(row.get('hours', 0) or 0)
+                except (ValueError, TypeError):
+                    h = 0.0
+
+                if eid not in emp_day_data:
+                    emp_day_data[eid] = {}
+                if d not in emp_day_data[eid]:
+                    emp_day_data[eid][d] = {
+                        'work_hours': 0.0,
+                        'leave_text': None,
+                        'holiday_text': None
+                    }
+
+                is_leave = p_code.startswith('LEAVE-') or p_status in ('Leave', 'Approved Leave') or p_phase == 'Leave'
+                is_holiday = p_code.startswith('HOLIDAY') or p_status == 'Holiday' or p_phase == 'Holiday'
+
+                if is_leave:
+                    leave_label = p_name if (p_name and p_name.lower() not in ('nan', 'none', '')) else "Leave"
+                    emp_day_data[eid][d]['leave_text'] = leave_label
+                elif is_holiday:
+                    h_label = p_name if (p_name and p_name.lower() not in ('nan', 'none', '')) else "Holiday"
+                    emp_day_data[eid][d]['holiday_text'] = h_label
+                    holiday_dates.add(d)
+                else:
+                    emp_day_data[eid][d]['work_hours'] += h
 
         all_weekdays = [d for d in all_dates if d.weekday() < 5 and d not in holiday_dates]
         for _, emp in all_employees.iterrows():
-            eid, ename = emp['employee_id'], emp['employee_name']
-            hours = emp_day_hours.get(eid, {})
+            eid = str(emp['employee_id'])
+            ename = emp['employee_name']
+            emp_records = emp_day_data.get(eid, {})
             r_dict = {'EMP Id': eid, 'Employee Name': ename}
             wt, df = 0.0, 0
             for d, c_name in zip(all_dates, day_cols):
-                h = hours.get(d, 0.0)
-                if h > 0:
-                    r_dict[c_name] = int(h) if float(h).is_integer() else round(h, 2)
+                rec = emp_records.get(d, {'work_hours': 0.0, 'leave_text': None, 'holiday_text': None})
+                work_h = rec['work_hours']
+                leave_txt = rec['leave_text']
+                holiday_txt = rec['holiday_text']
+
+                if d in holiday_date_map:
+                    # Recognized company holiday
+                    r_dict[c_name] = holiday_date_map[d]
+                elif holiday_txt:
+                    # Holiday entry from timesheet
+                    r_dict[c_name] = holiday_txt
+                elif leave_txt:
+                    # Approved leave: display leave as text, do not count hours in total
+                    r_dict[c_name] = leave_txt
+                    if d.weekday() < 5:
+                        df += 1
+                elif work_h > 0:
+                    r_dict[c_name] = int(work_h) if float(work_h).is_integer() else round(work_h, 2)
+                    if d.weekday() < 5:
+                        wt += work_h
+                        df += 1
                 else:
                     r_dict[c_name] = None
-                if d.weekday() < 5:
-                    wt += h
-                    if h > 0: df += 1
+
             r_dict['Total Hours'] = int(wt) if float(wt).is_integer() else round(wt, 2)
-            r_dict['Status'] = '✅' if len(all_weekdays) > 0 and df == len(all_weekdays) else '❌'
+            r_dict['Status'] = '✅' if len(all_weekdays) > 0 and df >= len(all_weekdays) else '❌'
             pivot_rows.append(r_dict)
 
         df_pivot = pd.DataFrame(pivot_rows, dtype=object)
@@ -166,6 +219,23 @@ def render_reports_page(user):
             if weekend_cols:
                 styler = styler.map(weekend_style, subset=weekend_cols)
                 
+            # Cell-level styling for Holidays and Leaves across day columns
+            holiday_names_set = set(holiday_date_map.values())
+            def cell_holiday_or_leave_style(val):
+                if isinstance(val, str) and val not in ('✅', '❌', ''):
+                    lower_val = val.lower()
+                    if 'leave' in lower_val:
+                        return 'background-color: #fef3c7; color: #92400e; font-weight: bold'
+                    if val in holiday_names_set or 'holiday' in lower_val:
+                        return 'background-color: #f5f3ff; color: #6d28d9; font-weight: bold; font-style: italic'
+                return ''
+            
+            if day_cols:
+                if hasattr(styler, 'map'):
+                    styler = styler.map(cell_holiday_or_leave_style, subset=day_cols)
+                else:
+                    styler = styler.applymap(cell_holiday_or_leave_style, subset=day_cols)
+                
             return styler
 
         styled_df = df_pivot.style.pipe(style_table)
@@ -179,11 +249,13 @@ def render_reports_page(user):
                 if 'Status' in excel_export.columns:
                     excel_export['Status'] = excel_export['Status'].replace({'✅': 'Complete', '❌': 'Incomplete'})
                 
-                from utils.xlsx_export import build_clean_xlsx
+                from utils.xlsx_export import build_clean_xlsx, build_styled_summary_xlsx
+                # Collect weekday column names (excluding holidays) to highlight missing hours
+                weekday_col_names = {day_cols[i] for i, d in enumerate(all_dates) if d.weekday() < 5 and d not in holiday_dates}
                 if not excel_export.empty:
-                    xlsx_bytes = build_clean_xlsx(excel_export, sheet_name='Summary')
+                    xlsx_bytes = build_styled_summary_xlsx(excel_export, weekday_col_names=weekday_col_names, sheet_name='Summary')
                 else:
-                    xlsx_bytes = build_clean_xlsx(pd.DataFrame(), sheet_name='Summary')
+                    xlsx_bytes = build_styled_summary_xlsx(pd.DataFrame(), sheet_name='Summary')
                 
                 st.download_button(
                     "📊 Export Summary (Excel)", 
@@ -251,14 +323,16 @@ def render_reports_page(user):
                         eid, ename, slack_id = emp['employee_id'], emp['employee_name'], emp.get('slack_id', '-')
                         if eid == 'admin': continue
                         
-                        emp_hours_map = emp_day_hours.get(eid, {})
-                        # Identify all incomplete days (h < 8) in the selected range, skipping weekends and holidays
+                        emp_records = emp_day_data.get(eid, {})
+                        # Identify all incomplete days in the selected range, skipping weekends, holidays, and approved leaves
                         incomplete_dates = []
                         for d in all_dates:
                             if d.weekday() >= 5: continue # Skip Weekends (Sat=5, Sun=6)
                             if d in holiday_dates: continue # Skip Company Holidays
-                            h = emp_hours_map.get(d, 0.0)
-                            if h < 8.0:
+                            rec = emp_records.get(d, {})
+                            if rec.get('leave_text') or rec.get('holiday_text'): continue # Skip Approved Leaves & Holidays
+                            work_h = rec.get('work_hours', 0.0)
+                            if work_h < 8.0:
                                 incomplete_dates.append(d.strftime('%d-%m-%Y'))
                         
                         if incomplete_dates:

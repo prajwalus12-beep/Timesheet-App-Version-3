@@ -196,6 +196,79 @@ def build_clean_xlsx(df: pd.DataFrame,
     return buffer.getvalue()
 
 
+def build_styled_summary_xlsx(df: pd.DataFrame,
+                               weekday_col_names: set = None,
+                               sheet_name: str = "Summary") -> bytes:
+    """Write report summary DataFrame to styled XLSX matching UI specification:
+    1. Header row: bold font, soft blue background (#729FCF), thin borders, center alignment for dates.
+    2. Data rows:
+       - Thin light gray borders (#D4D4D4) across all cells.
+       - Outer perimeter border line (medium top/bottom/left/right border).
+       - Weekdays (Mon-Fri, non-holiday): If hours are not shown (empty/blank/None/0), highlight in pure yellow (#FFFF00).
+       - Center aligned for dates, hours, and status.
+    3. Proper auto column widths and grid lines visible.
+    """
+    if weekday_col_names is None:
+        weekday_col_names = set()
+
+    clean_df = sanitise_dataframe(df)
+    n_data_rows = len(clean_df) + 1   # +1 for header row
+    n_data_cols = len(clean_df.columns)
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        clean_df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets[sheet_name]
+
+        header_fill = openpyxl.styles.PatternFill(start_color="729FCF", end_color="729FCF", fill_type="solid")
+        header_font = openpyxl.styles.Font(name="Calibri", size=11, bold=True, color="000000")
+        yellow_fill = openpyxl.styles.PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+        for r_idx in range(1, n_data_rows + 1):
+            for c_idx in range(1, n_data_cols + 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+
+                top_style = "medium" if r_idx == 1 else "thin"
+                bottom_style = "medium" if r_idx == n_data_rows else "thin"
+                left_style = "medium" if c_idx == 1 else "thin"
+                right_style = "medium" if c_idx == n_data_cols else "thin"
+
+                top_color = "000000" if r_idx == 1 else "D4D4D4"
+                bottom_color = "000000" if r_idx == n_data_rows else "D4D4D4"
+                left_color = "000000" if c_idx == 1 else "D4D4D4"
+                right_color = "000000" if c_idx == n_data_cols else "D4D4D4"
+
+                cell.border = openpyxl.styles.Border(
+                    top=openpyxl.styles.Side(style=top_style, color=top_color),
+                    bottom=openpyxl.styles.Side(style=bottom_style, color=bottom_color),
+                    left=openpyxl.styles.Side(style=left_style, color=left_color),
+                    right=openpyxl.styles.Side(style=right_style, color=right_color)
+                )
+
+                if r_idx == 1:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = openpyxl.styles.Alignment(
+                        horizontal="center" if c_idx > 2 else "left",
+                        vertical="center"
+                    )
+                else:
+                    col_name = clean_df.columns[c_idx - 1]
+                    if c_idx > 2:
+                        cell.alignment = openpyxl.styles.Alignment(horizontal="center", vertical="center")
+
+                    # Highlight missing weekday hours in yellow
+                    if col_name in weekday_col_names:
+                        v = cell.value
+                        if v is None or str(v).strip() in ("", "none", "nan") or v == 0:
+                            cell.fill = yellow_fill
+
+        apply_column_widths(ws, n_data_rows, n_data_cols)
+        ws.views.sheetView[0].showGridLines = True
+
+    return buffer.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Validation helper (used by tests)
 # ---------------------------------------------------------------------------
