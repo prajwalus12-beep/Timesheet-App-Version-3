@@ -38,7 +38,7 @@ def render_employees_page(user):
                 st.markdown('<div class="table-row">', unsafe_allow_html=True)
                 c1, c2, c_email, c_slack, c_status, c3 = st.columns([2, 3, 3, 2, 2, 2])
                 c1.markdown(f'<div class="table-cell">{row["username"]}</div>', unsafe_allow_html=True)
-                c2.markdown(f'<div class="table-cell"><b>{row["employee_name"] if row["employee_name"] else "N/A"}</b></div>', unsafe_allow_html=True)
+                c2.markdown(f'<div class="table-cell"><b>{row["employee_name"] if row["employee_name"] else "N/A"}</b><br/><small>{row.get("emp_type", "Full-Time Employee")}</small></div>', unsafe_allow_html=True)
                 c_email.markdown(f'<div class="table-cell">{row["email"] if row.get("email") else "-"}</div>', unsafe_allow_html=True)
                 c_slack.markdown(f'<div class="table-cell">{row["slack_id"] if row["slack_id"] else "-"}</div>', unsafe_allow_html=True)
                 
@@ -67,6 +67,7 @@ def render_employees_page(user):
             emp_name = st.text_input("Name *")
             email = st.text_input("Email")
             slack_id = st.text_input("Slack ID")
+            emp_type = st.selectbox("Employee Type", ["Full-Time Employee", "Intern"])
             status_sel = st.selectbox("Status", ["Active", "Inactive"])
             
             submitted = st.form_submit_button("Add Employee", type="primary")
@@ -77,7 +78,7 @@ def render_employees_page(user):
                     st.error("Invalid email format.")
                 else:
                     status_val = 1 if status_sel == "Active" else 0
-                    success, msg = add_employee(emp_id, emp_name, slack_id, email, status=status_val)
+                    success, msg = add_employee(emp_id, emp_name, slack_id, email, status=status_val, emp_type=emp_type)
                     if success:
                         st.success(msg)
                         st.rerun()
@@ -103,6 +104,9 @@ def render_employees_page(user):
                 e_email = st.text_input("Email", value=emp_data.get('email') or "", disabled=not emp_is_active)
                 e_slack = st.text_input("Slack ID", value=emp_data['slack_id'] or "", disabled=not emp_is_active)
                 
+                emp_type_idx = 0 if emp_data.get('emp_type', 'Full-Time Employee') == 'Full-Time Employee' else 1
+                e_emp_type = st.selectbox("Employee Type", ["Full-Time Employee", "Intern"], index=emp_type_idx, disabled=not emp_is_active)
+
                 status_idx = 0 if emp_is_active else 1
                 e_status = st.selectbox("Status", ["Active", "Inactive"], index=status_idx)
                 
@@ -114,7 +118,7 @@ def render_employees_page(user):
                         st.error("Invalid email format.")
                     else:
                         status_val = 1 if e_status == "Active" else 0
-                        success, msg = update_employee(selected_emp_id, e_name, e_slack, e_email, status=status_val)
+                        success, msg = update_employee(selected_emp_id, e_name, e_slack, e_email, status=status_val, emp_type=e_emp_type)
                         if success:
                             st.success(msg)
                             st.rerun()

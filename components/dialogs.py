@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from database.queries import (
     get_all_projects, add_timesheet_entry, update_timesheet_entry, verify_user_password,
     update_user_password, has_leave_for_date, add_leave_entries,
-    add_holiday, update_holiday, delete_holiday, import_holidays
+    add_holiday, update_holiday, delete_holiday, import_holidays, get_all_holidays
 )
 from services.auth_service import is_password_strong, encrypt_data
 
@@ -474,15 +474,30 @@ def add_leave_dialog(user, emp_options, current_emp_id):
     default_idx = options.index(user_option_key) if user_option_key in options else 0
     
     leave_emp = st.selectbox("Employee Name", options, index=default_idx, disabled=not (user.get("role") == "admin"), key="leave_emp_modal")
-    leave_type = st.selectbox("Leave Type", ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave"], key="leave_type_modal")
+    leave_type = st.selectbox("Leave Type", ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave", "Holiday"], key="leave_type_modal")
     
-    col_start, col_end = st.columns(2)
-    with col_start:
-        start_date = st.date_input("Start Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_start_modal")
-    with col_end:
-        end_date = st.date_input("End Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_end_modal")
+    if leave_type == "Holiday":
+        holidays_df = get_all_holidays(include_inactive=False)
+        if holidays_df.empty:
+            st.warning("No holidays configured in the system.")
+            st.stop()
         
-    reason = st.text_area("Reason / Notes", placeholder="e.g. Personal errand / Doctor appointment", key="leave_reason_modal")
+        holiday_options = {f"{r['holiday_name']} ({r['holiday_date']})": r for _, r in holidays_df.iterrows()}
+        selected_holiday_label = st.selectbox("Select Holiday", list(holiday_options.keys()), key="holiday_select_modal")
+        selected_holiday = holiday_options[selected_holiday_label]
+        
+        start_date = pd.to_datetime(selected_holiday['holiday_date']).date()
+        end_date = start_date
+        reason = selected_holiday['holiday_name']
+        st.info(f"Holiday Date: {start_date.strftime('%d-%m-%Y')}")
+    else:
+        col_start, col_end = st.columns(2)
+        with col_start:
+            start_date = st.date_input("Start Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_start_modal")
+        with col_end:
+            end_date = st.date_input("End Date", datetime.date.today(), format="DD-MM-YYYY", key="leave_end_modal")
+            
+        reason = st.text_area("Reason / Notes", placeholder="e.g. Personal errand / Doctor appointment", key="leave_reason_modal")
     
     st.info("⚙️ **Automatic Exclusions Applied:**\n\n- Date will be locked against regular work time logging.\n- Will be omitted from client billable Excel reports.\n- Suppresses automated 'Timesheet Missing' emails for this date.")
     
@@ -520,23 +535,38 @@ def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
     }
     current_code = str(entry_data.get('project_code', ''))
     default_type = code_to_type.get(current_code, "Casual Leave")
-    leave_types = ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave"]
+    leave_types = ["Casual Leave", "Sick Leave", "Earned/Paid Leave", "Unpaid Leave", "Holiday"]
     default_type_idx = leave_types.index(default_type) if default_type in leave_types else 0
     leave_type = st.selectbox("Leave Type", leave_types, index=default_type_idx, key="edit_leave_type_modal")
     
-    today = datetime.date.today()
-    end_of_week = today + datetime.timedelta(days=(6 - today.weekday()))
-    col_d, col_h = st.columns(2)
-    with col_d:
-        row_date = entry_data.get('date')
-        if isinstance(row_date, str):
-            row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
-        entry_date = st.date_input("Date", row_date, max_value=end_of_week, format="DD-MM-YYYY", key="edit_leave_date_modal")
-    with col_h:
-        entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, value=float(entry_data.get('hours', 8.0)), key="edit_leave_hours_modal")
+    if leave_type == "Holiday":
+        holidays_df = get_all_holidays(include_inactive=False)
+        if holidays_df.empty:
+            st.warning("No holidays configured in the system.")
+            st.stop()
+            
+        holiday_options = {f"{r['holiday_name']} ({r['holiday_date']})": r for _, r in holidays_df.iterrows()}
+        selected_holiday_label = st.selectbox("Select Holiday", list(holiday_options.keys()), key="edit_holiday_select_modal")
+        selected_holiday = holiday_options[selected_holiday_label]
         
-    current_comment = entry_data.get('comment', '') or ''
-    reason = st.text_area("Reason / Notes", value=str(current_comment), placeholder="e.g. Personal errand / Doctor appointment", key="edit_leave_reason_modal")
+        entry_date = pd.to_datetime(selected_holiday['holiday_date']).date()
+        entry_hours = 8.0
+        reason = selected_holiday['holiday_name']
+        st.info(f"Holiday Date: {entry_date.strftime('%d-%m-%Y')}")
+    else:
+        today = datetime.date.today()
+        end_of_week = today + datetime.timedelta(days=(6 - today.weekday()))
+        col_d, col_h = st.columns(2)
+        with col_d:
+            row_date = entry_data.get('date')
+            if isinstance(row_date, str):
+                row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
+            entry_date = st.date_input("Date", row_date, max_value=end_of_week, format="DD-MM-YYYY", key="edit_leave_date_modal")
+        with col_h:
+            entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, value=float(entry_data.get('hours', 8.0)), key="edit_leave_hours_modal")
+            
+        current_comment = entry_data.get('comment', '') or ''
+        reason = st.text_area("Reason / Notes", value=str(current_comment), placeholder="e.g. Personal errand / Doctor appointment", key="edit_leave_reason_modal")
     
     st.info("⚙️ Leave dates are excluded from regular hours & billable Excel exports.")
     
@@ -549,9 +579,15 @@ def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
             "Casual Leave": ("LEAVE-CL", "Casual Leave (CL)"),
             "Sick Leave": ("LEAVE-SL", "Sick Leave (SL)"),
             "Earned/Paid Leave": ("LEAVE-PL", "Earned/Paid Leave (PL)"),
-            "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)")
+            "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)"),
+            "Holiday": ("HOLIDAY", "Holiday")
         }
         proj_code, proj_name = type_to_proj.get(leave_type, ("LEAVE-OTHER", f"Leave ({leave_type})"))
+        
+        # Determine status
+        proj_status = "Holiday" if leave_type == "Holiday" else "Approved Leave"
+        phase = "Holiday" if leave_type == "Holiday" else "Analysis"
+        
         e_id = emp_options[leave_emp]
         e_name = leave_emp.split(" (")[0]
         
@@ -564,8 +600,8 @@ def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
                 project_name=proj_name,
                 date=entry_date,
                 hours=entry_hours,
-                phase="Analysis",
-                project_status="Approved Leave",
+                phase=phase,
+                project_status=proj_status,
                 comment=reason
             )
             if success:

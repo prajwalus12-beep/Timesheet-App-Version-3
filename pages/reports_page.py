@@ -43,6 +43,8 @@ def render_reports_page(user):
             report_emps = get_all_employees(exclude_admin=True)
             if 'status' in report_emps.columns:
                 report_emps = report_emps[report_emps['status'].astype(int) == 1]
+            if 'emp_type' in report_emps.columns:
+                report_emps = report_emps[report_emps['emp_type'] != 'Intern']
             report_emp_options = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in report_emps.iterrows()}
             sel_emp_name = st.selectbox("Employee", ["All Employees"] + list(report_emp_options.keys()), key="report_emp")
             sel_emp_id = report_emp_options[sel_emp_name] if sel_emp_name != "All Employees" else None
@@ -91,6 +93,8 @@ def render_reports_page(user):
     all_employees = get_all_employees(exclude_admin=True)
     if 'status' in all_employees.columns:
         all_employees = all_employees[all_employees['status'].astype(int) == 1]
+    if 'emp_type' in all_employees.columns:
+        all_employees = all_employees[all_employees['emp_type'] != 'Intern']
     if sel_emp_id: all_employees = all_employees[all_employees['employee_id'] == sel_emp_id]
     ts_data = get_timesheets(r_start, r_end, sel_emp_id, sel_proj_code)
 
@@ -160,7 +164,12 @@ def render_reports_page(user):
                 leave_txt = rec['leave_text']
                 holiday_txt = rec['holiday_text']
 
-                if d in holiday_date_map:
+                if work_h > 0:
+                    r_dict[c_name] = int(work_h) if float(work_h).is_integer() else round(work_h, 2)
+                    if d.weekday() < 5:
+                        wt += work_h
+                        df += 1
+                elif d in holiday_date_map:
                     # Recognized company holiday
                     r_dict[c_name] = holiday_date_map[d]
                 elif holiday_txt:
@@ -170,11 +179,6 @@ def render_reports_page(user):
                     # Approved leave: display leave as text, do not count hours in total
                     r_dict[c_name] = leave_txt
                     if d.weekday() < 5:
-                        df += 1
-                elif work_h > 0:
-                    r_dict[c_name] = int(work_h) if float(work_h).is_integer() else round(work_h, 2)
-                    if d.weekday() < 5:
-                        wt += work_h
                         df += 1
                 else:
                     r_dict[c_name] = None

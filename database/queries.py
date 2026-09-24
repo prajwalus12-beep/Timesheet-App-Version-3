@@ -11,13 +11,14 @@ def get_all_employees(exclude_admin=False):
     
     # Try fetching with email and status columns
     try:
-        query = supabase.table('employee').select('employee_id, employee_name, slack_id, email, status')
+        query = supabase.table('employee').select('employee_id, employee_name, slack_id, email, status, emp_type')
         if exclude_admin:
             query = query.neq('employee_id', 'admin')
         res = query.order('employee_name').execute()
         data = res.data or []
-        df = pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id', 'email', 'status'])
+        df = pd.DataFrame(data, columns=['employee_id', 'employee_name', 'slack_id', 'email', 'status', 'emp_type'])
         df['status'] = df['status'].fillna(1).astype(int)
+        df['emp_type'] = df['emp_type'].fillna('Full-Time Employee')
         return df
     except Exception:
         # Fallback if email or status column isn't accessible
@@ -100,7 +101,7 @@ def get_all_users():
     
     try:
         # Try fetching with the new columns
-        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access, email, status)').order('username').execute()
+        res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id, project_update_access, email, status, emp_type)').order('username').execute()
     except Exception:
         # Fallback if columns don't exist yet
         res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id)').order('username').execute()
@@ -118,10 +119,11 @@ def get_all_users():
             emp.get('project_update_access', False), # Defaults to False if missing
             r['employee_id'],
             emp.get('email'),
-            emp.get('status', 1)
+            emp.get('status', 1),
+            emp.get('emp_type', 'Full-Time Employee')
         ])
     
-    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status'])
+    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status', 'emp_type'])
 
 def get_employee_by_id(emp_id):
     """Fetch single employee details using Supabase SDK."""
@@ -192,7 +194,8 @@ LEAVE_PROJECT_TYPES = {
     "Casual Leave": ("LEAVE-CL", "Casual Leave (CL)"),
     "Sick Leave": ("LEAVE-SL", "Sick Leave (SL)"),
     "Earned/Paid Leave": ("LEAVE-PL", "Earned/Paid Leave (PL)"),
-    "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)")
+    "Unpaid Leave": ("LEAVE-UL", "Unpaid Leave (UL)"),
+    "Holiday": ("HOLIDAY", "Holiday")
 }
 
 def ensure_leave_projects_exist():
@@ -207,6 +210,7 @@ def ensure_leave_projects_exist():
             {"project_code": "LEAVE-PL", "project_name": encrypt_data("Earned/Paid Leave (PL)"), "status": "Leave"},
             {"project_code": "LEAVE-UL", "project_name": encrypt_data("Unpaid Leave (UL)"), "status": "Leave"},
             {"project_code": "LEAVE-OTHER", "project_name": encrypt_data("Leave (Other)"), "status": "Leave"},
+            {"project_code": "HOLIDAY", "project_name": encrypt_data("Holiday"), "status": "Holiday"},
         ]
         supabase.table('project').upsert(leave_records, on_conflict='project_code').execute()
     except Exception:
@@ -228,7 +232,7 @@ def add_leave_entries(emp_id, emp_name, leave_type_str, start_date, end_date, re
             supabase.table('project').upsert([{
                 "project_code": project_code,
                 "project_name": encrypt_data(project_name),
-                "status": "Leave"
+                "status": "Holiday" if leave_type_str == "Holiday" else "Leave"
             }], on_conflict='project_code').execute()
     except Exception:
         pass
@@ -245,8 +249,8 @@ def add_leave_entries(emp_id, emp_name, leave_type_str, start_date, end_date, re
             project_name=project_name,
             date=current_date,
             hours=8.0,
-            phase="Analysis", # Dummy phase
-            project_status="Approved Leave",
+            phase="Holiday" if leave_type_str == "Holiday" else "Analysis", # Dummy phase
+            project_status="Holiday" if leave_type_str == "Holiday" else "Approved Leave",
             comment=reason
         )
         if ok:
@@ -972,6 +976,8 @@ def import_project_updates(df):
                 row_preserved = False
                 
                 for db_f, parser, default in data_fields:
+                    is_mapped = col_mapping.get(db_f) is not None
+                    
                     if db_f == 'project_name':
                         imp_val = str(raw_proj).strip() if pd.notna(raw_proj) else default
                     else:
@@ -983,30 +989,27 @@ def import_project_updates(df):
                     is_updated = existing.get(flag_col, False)
                     db_val = existing.get(db_f)
                     
-                    if is_updated:
-                        # Case: Field was manually edited (*_updated = TRUE)
-                        if _normalize_for_cmp(imp_val) == _normalize_for_cmp(db_val):
-                            # Sub-case: Imported data matches current edited value
-                            record[db_f] = imp_val
-                            record[flag_col] = False
-                            cleared_count += 1
-                            row_changed = True
-                        else:
-                            # Sub-case: Imported sheet data does not match manually edited field
-                            record[db_f] = db_val
-                            record[flag_col] = True
-                            row_preserved = True
-                    else:
-                        # Case: Field was NOT manually edited (*_updated = FALSE)
+                    if is_mapped:
                         if _normalize_for_cmp(imp_val) != _normalize_for_cmp(db_val):
-                            # Sub-case: Imported sheet data is different
+                            # Imported data is different, overwrite it and clear flag
                             record[db_f] = imp_val
                             record[flag_col] = False
                             row_changed = True
+                            if is_updated:
+                                cleared_count += 1
                         else:
-                            # Sub-case: Values match, ensure flag stays FALSE
+                            # Imported data matches, ensure flag is cleared
                             record[db_f] = db_val
-                            record[flag_col] = False
+                            if is_updated:
+                                record[flag_col] = False
+                                cleared_count += 1
+                                row_changed = True
+                            else:
+                                record[flag_col] = False
+                    else:
+                        # Column not in CSV, preserve existing DB value and manual flag
+                        record[db_f] = db_val
+                        record[flag_col] = is_updated
                 
                 if row_changed or row_preserved:
                     if "project_code_updated" in existing:
@@ -1017,9 +1020,14 @@ def import_project_updates(df):
             else:
                 # New record: Set all flags to FALSE
                 for db_f, parser, default in data_fields:
-                    excel_f = col_mapping.get(db_f)
-                    raw_val = row.get(excel_f) if excel_f else None
-                    record[db_f] = parser(raw_val) if raw_val is not None else default
+                    if db_f == 'project_name':
+                        imp_val = str(raw_proj).strip() if pd.notna(raw_proj) else default
+                    else:
+                        excel_f = col_mapping.get(db_f)
+                        raw_val = row.get(excel_f) if excel_f else None
+                        imp_val = parser(raw_val) if raw_val is not None else default
+                    
+                    record[db_f] = imp_val
                     record[f"{db_f}_updated"] = False
                 
                 record["project_code_updated"] = False
@@ -1112,7 +1120,7 @@ def init_db():
     except Exception as e:
         return False, str(e)
 
-def add_employee(emp_id, emp_name, slack_id, email=None, status=1):
+def add_employee(emp_id, emp_name, slack_id, email=None, status=1, emp_type="Full-Time Employee"):
     """Add a new employee and their user account."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -1130,7 +1138,8 @@ def add_employee(emp_id, emp_name, slack_id, email=None, status=1):
             "employee_name": emp_name,
             "slack_id": slack_id,
             "email": email if str(email).strip() else None,
-            "status": int(status)
+            "status": int(status),
+            "emp_type": emp_type
         }).execute()
         
         username = " ".join(emp_name.strip().lower().split())
@@ -1145,7 +1154,7 @@ def add_employee(emp_id, emp_name, slack_id, email=None, status=1):
     except Exception as e:
         return False, str(e)
 
-def update_employee(emp_id, emp_name, slack_id, email=None, status=1):
+def update_employee(emp_id, emp_name, slack_id, email=None, status=1, emp_type="Full-Time Employee"):
     """Update an existing employee."""
     supabase = get_supabase_client()
     if not supabase: return False, "Configuration error"
@@ -1160,7 +1169,8 @@ def update_employee(emp_id, emp_name, slack_id, email=None, status=1):
             "employee_name": emp_name,
             "slack_id": slack_id,
             "email": email if str(email).strip() else None,
-            "status": int(status)
+            "status": int(status),
+            "emp_type": emp_type
         }).eq('employee_id', emp_id).execute()
         
         return True, "Employee updated successfully"
