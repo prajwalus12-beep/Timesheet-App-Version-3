@@ -341,6 +341,7 @@ def render_reports_page(user):
                     y=bar_df['project_name'],
                     orientation='h',
                     customdata=bar_customdata,
+                    cliponaxis=False,
                     marker=dict(
                         color=bar_df['hours'],
                         colorscale='Blues',
@@ -358,6 +359,10 @@ def render_reports_page(user):
                     textposition='outside',
                     textfont=dict(size=12, color='#0f172a')
                 ))
+                # Extend x-axis range to give outside labels enough room
+                bar_max = bar_df['hours'].max() if not bar_df.empty else 1
+                x_range_max = bar_max * 1.65  # 65% headroom for the longest label
+
                 fig_bar.update_layout(
                     title=dict(
                         text='<b>Total Value by Project (Top 20)</b>',
@@ -368,18 +373,20 @@ def render_reports_page(user):
                         title=dict(text='Hours', font=dict(size=16)),
                         gridcolor='#f1f5f9',
                         zeroline=False,
-                        tickfont=dict(size=13)
+                        tickfont=dict(size=13),
+                        range=[0, x_range_max],
                     ),
                     yaxis=dict(
                         autorange='reversed',
                         tickfont=dict(size=13),
                         showgrid=False,
                     ),
-                    margin=dict(l=0, r=260, t=50, b=50),
-                    height=max(500, len(bar_df) * 40 + 80),
+                    margin=dict(l=0, r=20, t=50, b=50),
+                    height=max(500, len(bar_df) * 45 + 100),
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
-                    bargap=0.25,
+                    bargap=0.3,
+                    uniformtext=dict(mode='hide', minsize=9),
                 )
                 st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
 
