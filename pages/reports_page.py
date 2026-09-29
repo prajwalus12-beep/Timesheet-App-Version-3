@@ -225,8 +225,11 @@ def render_reports_page(user):
 
             # Only display the charts section if there is actual data to plot
             if not chart_data.empty and chart_data['hours'].sum() > 0:
-                st.write("### 📈 Charts & Analytics")
-                
+                chart_hdr_col, chart_exp_col = st.columns([7, 3])
+                with chart_hdr_col:
+                    st.write("### 📈 Charts & Analytics")
+                # chart_exp_col used later after charts are built
+
                 # Display charts stacked vertically for maximum readability
                 # ── Pie Chart: Hours distribution by Project ──────────────────
                 pie_df = (
@@ -234,15 +237,15 @@ def render_reports_page(user):
                     .sum()
                     .sort_values('hours', ascending=False)
                 )
-                # Limit to top 15 projects for readability; group rest as "Other"
-                if len(pie_df) > 15:
-                    top15 = pie_df.head(15)
-                    other_h = pie_df.iloc[15:]['hours'].sum()
+                # Limit to top 10 projects for readability; group rest as "Other"
+                if len(pie_df) > 10:
+                    top10 = pie_df.head(10)
+                    other_h = pie_df.iloc[10:]['hours'].sum()
                     if other_h > 0:
                         other_row = pd.DataFrame([{'project_name': 'Other', 'hours': other_h}])
-                        pie_df = pd.concat([top15, other_row], ignore_index=True)
+                        pie_df = pd.concat([top10, other_row], ignore_index=True)
                     else:
-                        pie_df = top15
+                        pie_df = top10
 
                 # Add percentage + hours + days to project names for the legend
                 total_pie_hours = pie_df['hours'].sum()
@@ -253,11 +256,13 @@ def render_reports_page(user):
                     days = int(h // 8)
                     rem_h = h % 8
                     day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
-                    return f"{row['project_name']}  ·  {h:.1f}h ({day_str})  {pct:.1f}%"
+                    raw_name = str(row['project_name'])
+                    display_name = raw_name if len(raw_name) <= 45 else raw_name[:42] + '...'
+                    return f"{display_name}  ·  {h:.1f}h ({day_str})  {pct:.1f}%"
 
                 pie_labels = pie_df.apply(_pie_legend_label, axis=1)
 
-                # Customdata for hover: [hours, days_str, percent]
+                # Customdata for hover: [hours, days_str, percent, full_project_name]
                 pie_customdata = []
                 for _, row in pie_df.iterrows():
                     h = row['hours']
@@ -265,18 +270,21 @@ def render_reports_page(user):
                     days = int(h // 8)
                     rem_h = h % 8
                     day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
-                    pie_customdata.append([h, day_str, pct])
+                    pie_customdata.append([h, day_str, pct, str(row['project_name'])])
 
                 fig_pie = go.Figure(go.Pie(
                     labels=pie_labels,
                     values=pie_df['hours'],
-                    hole=0.35,
+                    hole=0.40,
+                    domain=dict(x=[0.0, 0.38], y=[0.0, 1.0]),
                     customdata=pie_customdata,
                     textinfo='percent',
+                    textposition='inside',
+                    insidetextorientation='horizontal',
                     texttemplate='<b>%{percent:.1%}</b>',
-                    textfont=dict(size=13, color='black'),
+                    textfont=dict(size=12, color='#1e293b'),
                     hovertemplate=(
-                        '<b>%{label}</b><br>'
+                        '<b>%{customdata[3]}</b><br>'
                         'Hours: <b>%{customdata[0]:.1f}h</b><br>'
                         'Days: <b>%{customdata[1]}</b><br>'
                         'Share: <b>%{customdata[2]:.1f}%</b>'
@@ -295,13 +303,18 @@ def render_reports_page(user):
                     ),
                     showlegend=True,
                     legend=dict(
-                        font=dict(size=13),
+                        font=dict(size=12),
+                        x=0.42,
+                        y=0.5,
+                        yanchor='middle',
+                        xanchor='left',
                         tracegroupgap=4,
                     ),
-                    margin=dict(l=0, r=0, t=50, b=0),
-                    height=520,
+                    margin=dict(l=10, r=10, t=50, b=20),
+                    height=max(500, len(pie_df) * 38 + 90),
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
+                    uniformtext=dict(mode='hide', minsize=10),
                 )
                 st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart")
 
@@ -389,6 +402,120 @@ def render_reports_page(user):
                     uniformtext=dict(mode='hide', minsize=9),
                 )
                 st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+
+                # ── Export Charts as PDF ──────────────────────────────────────
+                with chart_exp_col:
+                    st.markdown('<div style="margin-top:1.6rem"></div>', unsafe_allow_html=True)
+                    try:
+                        import kaleido  # noqa: F401 – availability check
+                        from reportlab.lib.pagesizes import A4, landscape
+                        from reportlab.lib.units import cm
+                        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                        from reportlab.lib.enums import TA_CENTER
+                        from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Paragraph, Spacer, PageBreak
+                        from reportlab.lib import colors
+
+                        def _build_charts_pdf():
+                            """Render both figures to PNG via kaleido, then embed in a 2-page landscape PDF."""
+                            pdf_buf = io.BytesIO()
+                            doc = SimpleDocTemplate(
+                                pdf_buf,
+                                pagesize=landscape(A4),
+                                leftMargin=1.5*cm, rightMargin=1.5*cm,
+                                topMargin=1.2*cm, bottomMargin=1.2*cm,
+                            )
+                            pw = landscape(A4)[0] - 3.0*cm   # usable width (~756.8pt)
+
+                            styles = getSampleStyleSheet()
+                            title_style = ParagraphStyle(
+                                'ChartTitle',
+                                parent=styles['Heading1'],
+                                fontSize=15,
+                                leading=18,
+                                textColor=colors.HexColor('#0f172a'),
+                                alignment=TA_CENTER,
+                                spaceAfter=3,
+                            )
+                            sub_style = ParagraphStyle(
+                                'ChartSub',
+                                parent=styles['Normal'],
+                                fontSize=9,
+                                leading=12,
+                                textColor=colors.HexColor('#64748b'),
+                                alignment=TA_CENTER,
+                                spaceAfter=8,
+                            )
+
+                            story = []
+
+                            # ── Page 1: Pie Chart (Distribution by Project) ───
+                            story.append(Paragraph('<b>📈 Timesheet Analytics — Hours Distribution by Project</b>', title_style))
+                            story.append(Paragraph(
+                                f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
+                                sub_style
+                            ))
+                            story.append(Spacer(1, 0.2*cm))
+
+                            # Render pie chart for PDF – full landscape width matching UI
+                            f_pie_pdf = go.Figure(fig_pie)
+                            f_pie_pdf.update_layout(
+                                paper_bgcolor='white',
+                                plot_bgcolor='white',
+                                width=1100,
+                                height=520,
+                                margin=dict(l=15, r=15, t=40, b=20),
+                            )
+                            pie_png = f_pie_pdf.to_image(format='png', scale=2)
+                            pie_w = pw
+                            pie_h = pie_w * (520 / 1100)
+                            story.append(RLImage(io.BytesIO(pie_png), width=pie_w, height=pie_h))
+
+                            # ── Page 2: Bar Chart (Total Hours per Project) ───
+                            story.append(PageBreak())
+                            story.append(Paragraph('<b>📊 Timesheet Analytics — Total Value by Project (Top 20)</b>', title_style))
+                            story.append(Paragraph(
+                                f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
+                                sub_style
+                            ))
+                            story.append(Spacer(1, 0.2*cm))
+
+                            # Render bar chart for PDF with fixed landscape aspect ratio
+                            f_bar_pdf = go.Figure(fig_bar)
+                            f_bar_pdf.update_layout(
+                                paper_bgcolor='white',
+                                plot_bgcolor='white',
+                                width=1100,
+                                height=620,
+                                margin=dict(l=20, r=30, t=30, b=40),
+                            )
+                            bar_png = f_bar_pdf.to_image(format='png', scale=2)
+
+                            # Clamp height to fit comfortably on Page 2 without overflowing
+                            max_bar_h = 450.0
+                            bar_w = pw
+                            bar_h = bar_w * (620 / 1100)
+                            if bar_h > max_bar_h:
+                                bar_h = max_bar_h
+                                bar_w = bar_h * (1100 / 620)
+
+                            story.append(RLImage(io.BytesIO(bar_png), width=bar_w, height=bar_h))
+
+                            doc.build(story)
+                            return pdf_buf.getvalue()
+
+                        fname = f"charts_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
+                        st.download_button(
+                            label="📄 Export PDF",
+                            data=_build_charts_pdf,
+                            file_name=fname,
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                    except ImportError:
+                        st.info("Install `kaleido` to enable PDF export: `pip install kaleido`")
+                    except Exception as _pdf_err:
+                        st.warning(f"PDF export failed: {_pdf_err}")
+
 
 
         except ImportError:

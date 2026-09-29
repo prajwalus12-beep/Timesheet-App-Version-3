@@ -11,4 +11,6 @@ pillow
 supabase<=2.7.4
 openpyxl
 reportlab
-APScheduler>=3.10.0plotly>=5.0.0
+APScheduler>=3.10.0
+plotly>=5.0.0
+kaleido
