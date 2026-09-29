@@ -244,20 +244,44 @@ def render_reports_page(user):
                     else:
                         pie_df = top15
 
-                # Add percentage to project names for the legend
+                # Add percentage + hours + days to project names for the legend
                 total_pie_hours = pie_df['hours'].sum()
-                if total_pie_hours > 0:
-                    pie_labels = pie_df.apply(lambda row: f"{row['project_name']} - {(row['hours'] / total_pie_hours * 100):.1f}%" if pd.notnull(row['hours']) else row['project_name'], axis=1)
-                else:
-                    pie_labels = pie_df['project_name']
+
+                def _pie_legend_label(row):
+                    h = row['hours']
+                    pct = (h / total_pie_hours * 100) if total_pie_hours > 0 else 0
+                    days = int(h // 8)
+                    rem_h = h % 8
+                    day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
+                    return f"{row['project_name']}  ·  {h:.1f}h ({day_str})  {pct:.1f}%"
+
+                pie_labels = pie_df.apply(_pie_legend_label, axis=1)
+
+                # Customdata for hover: [hours, days_str, percent]
+                pie_customdata = []
+                for _, row in pie_df.iterrows():
+                    h = row['hours']
+                    pct = (h / total_pie_hours * 100) if total_pie_hours > 0 else 0
+                    days = int(h // 8)
+                    rem_h = h % 8
+                    day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
+                    pie_customdata.append([h, day_str, pct])
 
                 fig_pie = go.Figure(go.Pie(
                     labels=pie_labels,
                     values=pie_df['hours'],
                     hole=0.35,
+                    customdata=pie_customdata,
                     textinfo='percent',
-                    textfont=dict(size=14, color='black'),
-                    hovertemplate='<b>%{label}</b><br>Value: %{value:.1f}<br>Share: %{percent}<extra></extra>',
+                    texttemplate='<b>%{percent:.1%}</b>',
+                    textfont=dict(size=13, color='black'),
+                    hovertemplate=(
+                        '<b>%{label}</b><br>'
+                        'Hours: <b>%{customdata[0]:.1f}h</b><br>'
+                        'Days: <b>%{customdata[1]}</b><br>'
+                        'Share: <b>%{customdata[2]:.1f}%</b>'
+                        '<extra></extra>'
+                    ),
                     marker=dict(
                         colors=px.colors.qualitative.Set3,
                         line=dict(color='#ffffff', width=1.5)
@@ -270,9 +294,12 @@ def render_reports_page(user):
                         x=0
                     ),
                     showlegend=True,
-                    legend=dict(font=dict(size=14)),
+                    legend=dict(
+                        font=dict(size=13),
+                        tracegroupgap=4,
+                    ),
                     margin=dict(l=0, r=0, t=50, b=0),
-                    height=500,
+                    height=520,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                 )
@@ -288,20 +315,48 @@ def render_reports_page(user):
                     .head(20)  # Top 20 projects
                 )
 
+                bar_total = bar_df['hours'].sum()
+
+                def _bar_day_str(h):
+                    days = int(h // 8)
+                    rem_h = h % 8
+                    return f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
+
+                bar_pct = bar_df['hours'].apply(
+                    lambda h: (h / bar_total * 100) if bar_total > 0 else 0
+                )
+                bar_day_strs = bar_df['hours'].apply(_bar_day_str)
+
+                # Label shown on bar: hours | days | %
+                bar_text = [
+                    f"{h:.1f}h  ({_bar_day_str(h)})  {pct:.1f}%"
+                    for h, pct in zip(bar_df['hours'], bar_pct)
+                ]
+
+                # Customdata: [day_str, percent]
+                bar_customdata = list(zip(bar_day_strs, bar_pct.round(1)))
+
                 fig_bar = go.Figure(go.Bar(
                     x=bar_df['hours'],
                     y=bar_df['project_name'],
                     orientation='h',
+                    customdata=bar_customdata,
                     marker=dict(
                         color=bar_df['hours'],
                         colorscale='Blues',
                         showscale=False,
                         line=dict(color='rgba(58,134,255,0.6)', width=1)
                     ),
-                    hovertemplate='<b>%{y}</b><br>Value: %{x:.2f}<extra></extra>',
-                    text=bar_df['hours'].apply(lambda h: f'{h:g}'),
+                    hovertemplate=(
+                        '<b>%{y}</b><br>'
+                        'Hours: <b>%{x:.1f}h</b><br>'
+                        'Days: <b>%{customdata[0]}</b><br>'
+                        'Share: <b>%{customdata[1]:.1f}%</b>'
+                        '<extra></extra>'
+                    ),
+                    text=bar_text,
                     textposition='outside',
-                    textfont=dict(size=14, color='#0f172a')
+                    textfont=dict(size=12, color='#0f172a')
                 ))
                 fig_bar.update_layout(
                     title=dict(
@@ -310,21 +365,21 @@ def render_reports_page(user):
                         x=0
                     ),
                     xaxis=dict(
-                        title=dict(text='Value', font=dict(size=16)),
+                        title=dict(text='Hours', font=dict(size=16)),
                         gridcolor='#f1f5f9',
                         zeroline=False,
-                        tickfont=dict(size=14)
+                        tickfont=dict(size=13)
                     ),
                     yaxis=dict(
                         autorange='reversed',
-                        tickfont=dict(size=14),
+                        tickfont=dict(size=13),
                         showgrid=False,
                     ),
-                    margin=dict(l=0, r=80, t=50, b=50),
-                    height=max(500, len(bar_df) * 35 + 80),
+                    margin=dict(l=0, r=260, t=50, b=50),
+                    height=max(500, len(bar_df) * 40 + 80),
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
-                    bargap=0.2,
+                    bargap=0.25,
                 )
                 st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
 
