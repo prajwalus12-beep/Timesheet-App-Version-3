@@ -895,7 +895,8 @@ def import_project_updates(df):
             'checkbox_bc': ['CheckBoxe BC', 'CheckBoxe_BC', 'BRD'],
             'checkbox_trello': ['CheckBoxe Trello', 'CheckBoxe_Trello', 'Trello Check'],
             'checkbox_wa': ['CheckBoxe WA', 'CheckBoxe_WA', 'WA'],
-            'checkbox_ws': ['CheckBoxe WS', 'CheckBoxe_WS', 'WS']
+            'checkbox_ws': ['CheckBoxe WS', 'CheckBoxe_WS', 'WS'],
+            'notes': ['Notes', 'Note', 'Comments', 'Comment', 'notes']
         }
 
         # Pre-resolve which column name to use for each DB field based on the uploaded DataFrame columns
@@ -943,6 +944,7 @@ def import_project_updates(df):
             ('checkbox_trello', _parse_checkbox_value, None),
             ('checkbox_wa', _parse_checkbox_value, None),
             ('checkbox_ws', _parse_checkbox_value, None),
+            ('notes', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', '') else None, None),
         ]
 
         for _, row in df.iterrows():

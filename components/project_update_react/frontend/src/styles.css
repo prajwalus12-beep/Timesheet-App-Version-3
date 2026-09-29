@@ -1040,3 +1040,67 @@ input[type=number] {
   align-items: center;
   gap: 0.4rem;
 }
+
+/* ===== Notes Column ===== */
+.th-notes {
+  min-width: 160px;
+  max-width: 220px;
+  width: 180px;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.td-notes {
+  min-width: 160px;
+  max-width: 220px;
+  width: 180px;
+  padding: 0.4rem 0.5rem;
+  vertical-align: top;
+}
+
+.pu-notes-textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  color: #374151;
+  background: #ffffff;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.pu-notes-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+
+.pu-notes-textarea.dirty {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 0 0 2px rgba(245,158,11,0.10);
+}
+
+.pu-notes-textarea.db-updated {
+  border-color: #f59e0b;
+  background: #fef3c7;
+}
+
+.pu-notes-textarea:disabled {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: default;
+  resize: none;
+}

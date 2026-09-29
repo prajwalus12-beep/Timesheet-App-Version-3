@@ -84,7 +84,7 @@ function ProjectUpdateComponent(props) {
     "status_updated", "trello_link_updated", "start_date_updated",
     "end_date_updated", "prototype_link_updated", "slack_link_updated",
     "estimated_days_updated", "checkbox_bc_updated", "checkbox_trello_updated",
-    "checkbox_wa_updated", "checkbox_ws_updated"
+    "checkbox_wa_updated", "checkbox_ws_updated", "notes_updated"
   ];
 
   const filteredProjects = useMemo(() => {
@@ -230,7 +230,8 @@ function ProjectUpdateComponent(props) {
       const editableFields = [
         "project_name", "lead_engineer", "priority", "start_date", "end_date",
         "status", "trello_link", "prototype_link", "slack_link",
-        "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days"
+        "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days",
+        "notes"
       ];
       editableFields.forEach((f) => {
         if (String(server[f] ?? "") !== String(p[f] ?? "")) {
@@ -674,6 +675,9 @@ function ProjectUpdateComponent(props) {
                   </th>
                   <th className="th-status">
                     STATUS / PRIORITY
+                    {!isCompact && (
+                      <> / NOTES</>
+                    )}
                   </th>
                   {!isCompact && (
                     <>
@@ -793,6 +797,19 @@ function ProjectUpdateComponent(props) {
                               className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
                               disabled={readOnly || isCompact}
                               placeholder="Priority" />
+                              
+                            {!isCompact && (
+                              <textarea
+                                value={project.notes || ""}
+                                onChange={(e) => handleUpdate(project.project_code, "notes", e.target.value || null)}
+                                className={`pu-notes-textarea${isDirty(project.project_code, "notes") ? " dirty" : ""}${!isDirty(project.project_code, "notes") && isDbUpdated(project, "notes") ? " db-updated" : ""}`}
+                                style={{ marginTop: "0.2rem", minHeight: "44px" }}
+                                disabled={readOnly}
+                                placeholder="Add notes…"
+                                title={project.notes || "Add notes..."}
+                                rows={2}
+                              />
+                            )}
                           </div>
                         </td>
 

@@ -14,8 +14,8 @@ def render_reports_page(user):
         st.caption("Employee timesheet summary and statistics")
     # Handle reset flag BEFORE widgets are instantiated
     if st.session_state.pop('_reset_report_filters', False):
-        st.session_state.report_emp = "All Employees"
-        st.session_state.report_proj = "All Projects"
+        st.session_state.report_emp = []
+        st.session_state.report_proj = []
         st.session_state.report_date_range_picker = "This Week"
         st.session_state.report_start_date = datetime.date.today() - datetime.timedelta(days=30)
         st.session_state.report_end_date = datetime.date.today()
@@ -46,8 +46,8 @@ def render_reports_page(user):
             if 'emp_type' in report_emps.columns:
                 report_emps = report_emps[report_emps['emp_type'] != 'Intern']
             report_emp_options = {f"{r['employee_name']} ({r['employee_id']})": r['employee_id'] for _, r in report_emps.iterrows()}
-            sel_emp_name = st.selectbox("Employee", ["All Employees"] + list(report_emp_options.keys()), key="report_emp")
-            sel_emp_id = report_emp_options[sel_emp_name] if sel_emp_name != "All Employees" else None
+            sel_emp_names = st.multiselect("Employee", list(report_emp_options.keys()), placeholder="All Employees", key="report_emp")
+            sel_emp_ids = [report_emp_options[n] for n in sel_emp_names]
         
         with c2:
             all_projs = get_all_projects()
@@ -55,8 +55,8 @@ def render_reports_page(user):
             all_projs = all_projs.sort_values(by=['job_no_numeric', 'project_code'], ascending=[False, False])
             
             proj_options = {f"{r['project_code']} - {r['project_name']}": r['project_code'] for _, r in all_projs.iterrows()}
-            sel_proj_name = st.selectbox("Project", ["All Projects"] + list(proj_options.keys()), key="report_proj")
-            sel_proj_code = proj_options[sel_proj_name] if sel_proj_name != "All Projects" else None
+            sel_proj_names = st.multiselect("Project", list(proj_options.keys()), placeholder="All Projects", key="report_proj")
+            sel_proj_codes = [proj_options[n] for n in sel_proj_names]
             
         with c3:
             range_opt = st.selectbox("Date Range", ["This Week", "Last Week", "Current 4 Week Cycle", "Previous 4 Week Cycle", "Custom Range"], key="report_date_range_picker")
@@ -95,8 +95,15 @@ def render_reports_page(user):
         all_employees = all_employees[all_employees['status'].astype(int) == 1]
     if 'emp_type' in all_employees.columns:
         all_employees = all_employees[all_employees['emp_type'] != 'Intern']
-    if sel_emp_id: all_employees = all_employees[all_employees['employee_id'] == sel_emp_id]
-    ts_data = get_timesheets(r_start, r_end, sel_emp_id, sel_proj_code)
+    if sel_emp_ids:
+        all_employees = all_employees[all_employees['employee_id'].astype(str).isin([str(e) for e in sel_emp_ids])]
+        
+    ts_data = get_timesheets(r_start, r_end, None, None)
+    if not ts_data.empty:
+        if sel_emp_ids:
+            ts_data = ts_data[ts_data['emp_id'].astype(str).isin([str(e) for e in sel_emp_ids])]
+        if sel_proj_codes:
+            ts_data = ts_data[ts_data['project_code'].astype(str).isin([str(p) for p in sel_proj_codes])]
 
     if not all_employees.empty:
         num_days = (r_end - r_start).days + 1
@@ -201,7 +208,132 @@ def render_reports_page(user):
         col_s2.metric("Completed", completed_count)
         col_s3.metric("Uncompleted", uncompleted_count)
         col_s4.metric("Total Hours (Mon-Fri)", f"{total_hours:.1f}h")
-        
+
+        # ── Charts & Analytics ────────────────────────────────────────────────
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
+
+            # Prepare chart data from the filtered timesheet data
+            # Exclude LEAVE and HOLIDAY project codes from chart data
+            chart_data = pd.DataFrame()
+            if not ts_data.empty:
+                chart_data = ts_data[
+                    ~ts_data['project_code'].astype(str).str.startswith(('LEAVE-', 'HOLIDAY'))
+                ].copy()
+                chart_data['hours'] = pd.to_numeric(chart_data['hours'], errors='coerce').fillna(0)
+
+            # Only display the charts section if there is actual data to plot
+            if not chart_data.empty and chart_data['hours'].sum() > 0:
+                st.write("### 📈 Charts & Analytics")
+                
+                # Display charts stacked vertically for maximum readability
+                # ── Pie Chart: Hours distribution by Project ──────────────────
+                pie_df = (
+                    chart_data.groupby('project_name', as_index=False)['hours']
+                    .sum()
+                    .sort_values('hours', ascending=False)
+                )
+                # Limit to top 15 projects for readability; group rest as "Other"
+                if len(pie_df) > 15:
+                    top15 = pie_df.head(15)
+                    other_h = pie_df.iloc[15:]['hours'].sum()
+                    if other_h > 0:
+                        other_row = pd.DataFrame([{'project_name': 'Other', 'hours': other_h}])
+                        pie_df = pd.concat([top15, other_row], ignore_index=True)
+                    else:
+                        pie_df = top15
+
+                # Add percentage to project names for the legend
+                total_pie_hours = pie_df['hours'].sum()
+                if total_pie_hours > 0:
+                    pie_labels = pie_df.apply(lambda row: f"{row['project_name']} - {(row['hours'] / total_pie_hours * 100):.1f}%" if pd.notnull(row['hours']) else row['project_name'], axis=1)
+                else:
+                    pie_labels = pie_df['project_name']
+
+                fig_pie = go.Figure(go.Pie(
+                    labels=pie_labels,
+                    values=pie_df['hours'],
+                    hole=0.35,
+                    textinfo='percent',
+                    textfont=dict(size=14, color='black'),
+                    hovertemplate='<b>%{label}</b><br>Value: %{value:.1f}<br>Share: %{percent}<extra></extra>',
+                    marker=dict(
+                        colors=px.colors.qualitative.Set3,
+                        line=dict(color='#ffffff', width=1.5)
+                    )
+                ))
+                fig_pie.update_layout(
+                    title=dict(
+                        text='<b>Total Value by Project</b>',
+                        font=dict(size=20, color='#1e293b'),
+                        x=0
+                    ),
+                    showlegend=True,
+                    legend=dict(font=dict(size=14)),
+                    margin=dict(l=0, r=0, t=50, b=0),
+                    height=500,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                )
+                st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart")
+
+                st.markdown("<br><br>", unsafe_allow_html=True)
+
+                # ── Bar Chart: Total Hours per Project ────────────────────────
+                bar_df = (
+                    chart_data.groupby('project_name', as_index=False)['hours']
+                    .sum()
+                    .sort_values('hours', ascending=False)
+                    .head(20)  # Top 20 projects
+                )
+
+                fig_bar = go.Figure(go.Bar(
+                    x=bar_df['hours'],
+                    y=bar_df['project_name'],
+                    orientation='h',
+                    marker=dict(
+                        color=bar_df['hours'],
+                        colorscale='Blues',
+                        showscale=False,
+                        line=dict(color='rgba(58,134,255,0.6)', width=1)
+                    ),
+                    hovertemplate='<b>%{y}</b><br>Value: %{x:.2f}<extra></extra>',
+                    text=bar_df['hours'].apply(lambda h: f'{h:g}'),
+                    textposition='outside',
+                    textfont=dict(size=14, color='#0f172a')
+                ))
+                fig_bar.update_layout(
+                    title=dict(
+                        text='<b>Total Value by Project (Top 20)</b>',
+                        font=dict(size=20, color='#1e293b'),
+                        x=0
+                    ),
+                    xaxis=dict(
+                        title=dict(text='Value', font=dict(size=16)),
+                        gridcolor='#f1f5f9',
+                        zeroline=False,
+                        tickfont=dict(size=14)
+                    ),
+                    yaxis=dict(
+                        autorange='reversed',
+                        tickfont=dict(size=14),
+                        showgrid=False,
+                    ),
+                    margin=dict(l=0, r=80, t=50, b=50),
+                    height=max(500, len(bar_df) * 35 + 80),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    bargap=0.2,
+                )
+                st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+
+
+        except ImportError:
+            st.warning("⚠️ Charts require the `plotly` library. Run `pip install plotly` to enable them.")
+        except Exception as _chart_err:
+            st.warning(f"⚠️ Charts could not be rendered: {_chart_err}")
+
         st.write("### 📋 Employee Details")
         st.caption(f"Showing records from :blue[**{r_start.strftime('%d-%m-%Y')}**] to :blue[**{r_end.strftime('%d-%m-%Y')}**]")
         def style_table(styler):

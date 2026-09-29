@@ -97,7 +97,8 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         'checkbox_bc': 'CheckBoxe BC',
         'checkbox_trello': 'CheckBoxe Trello',
         'checkbox_wa': 'CheckBoxe WA',
-        'checkbox_ws': 'CheckBoxe WS'
+        'checkbox_ws': 'CheckBoxe WS',
+        'notes': 'Notes'
     }
 
     # Columns whose values are always preserved (row identifiers)
@@ -137,24 +138,30 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
             return name_to_id.get(s, v)
         clean_df['lead_engineer'] = clean_df['lead_engineer'].apply(_map_lead_engineer)
 
-    # ── Standardise Date Formats to dd/mm/yy ─────────────────────────────────
-    def _format_date_to_ddmmyy(v):
-        if pd.isna(v) or not v or str(v).strip().lower() in ('nan', 'none', 'nat', ''):
-            return ''
+    # ── Standardise Date Formats — write as real Excel dates (DD-MM-YYYY) ─────
+    def _parse_to_date(v):
+        """Return a Python datetime.date so Excel stores it as a real date cell."""
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        if s.lower() in ('nan', 'none', 'nat', ''):
+            return None
         try:
-            if hasattr(v, 'strftime'):
-                return v.strftime('%d/%m/%y')
-            dt = pd.to_datetime(v)
+            if hasattr(v, 'date'):
+                return v.date()
+            if hasattr(v, 'year'):      # already a date
+                return v
+            dt = pd.to_datetime(s, dayfirst=True)
             if pd.notna(dt):
-                return dt.strftime('%d/%m/%y')
+                return dt.date()
         except Exception:
             pass
-        return str(v)
+        return None
 
     if 'start_date' in clean_df.columns:
-        clean_df['start_date'] = clean_df['start_date'].apply(_format_date_to_ddmmyy)
+        clean_df['start_date'] = clean_df['start_date'].apply(_parse_to_date)
     if 'end_date' in clean_df.columns:
-        clean_df['end_date'] = clean_df['end_date'].apply(_format_date_to_ddmmyy)
+        clean_df['end_date'] = clean_df['end_date'].apply(_parse_to_date)
 
     # ── Convert Job No and Lead Engineer to numeric where possible ───────────
     def _to_numeric_where_possible(v):
@@ -192,11 +199,26 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     n_data_rows = len(renamed_df) + 1
     n_data_cols = len(renamed_df.columns)
 
+    # Determine which Excel columns correspond to date fields
+    date_col_names = {'Start Date', 'End Date'}
+    date_col_indices = [
+        idx + 1
+        for idx, col_name in enumerate(renamed_df.columns)
+        if col_name in date_col_names
+    ]
+
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+    with pd.ExcelWriter(buffer, engine='openpyxl', date_format='DD-MM-YYYY', datetime_format='DD-MM-YYYY') as writer:
         renamed_df.to_excel(writer, index=False, sheet_name='Updated Projects')
         worksheet = writer.sheets['Updated Projects']
-        
+
+        # Apply DD-MM-YYYY number format to date columns so Excel shows them correctly
+        for col_idx in date_col_indices:
+            for row_idx in range(2, n_data_rows + 1):  # skip header row
+                cell = worksheet.cell(row=row_idx, column=col_idx)
+                if cell.value is not None:
+                    cell.number_format = 'DD-MM-YYYY'
+
         if highlight_updated:
             yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
             for row_idx in range(len(clean_df)):
@@ -205,10 +227,10 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
                     if flag_col in clean_df.columns and clean_df.iloc[row_idx][flag_col] == True:
                         cell = worksheet.cell(row=row_idx + 2, column=col_idx + 1)
                         cell.fill = yellow_fill
-                        
+
         apply_column_widths(worksheet, n_data_rows, n_data_cols, comment_col_name="None")
         deep_clean_worksheet(worksheet, n_data_rows, n_data_cols)
-    
+
     return buffer.getvalue()
 
 

@@ -139,13 +139,16 @@ def render_timesheet_page(user):
 
         with col_emp:
             if is_admin:
-                emp_options = ["All"] + list(emp_labels.keys())
-                selected_emp_name = st.selectbox("Employee", emp_options, key="filter_emp")
+                emp_options = ["Select all"] + list(emp_labels.keys())
+                selected_emp_name = st.selectbox("Employee", emp_options, index=None, placeholder="All Employees", key="filter_emp")
             else:
                 emp_options = [current_emp_name_label]
                 selected_emp_name = st.selectbox("Employee", emp_options, disabled=True, key="filter_emp")
             
-            selected_emp_id = emp_labels.get(selected_emp_name) if selected_emp_name != "All" else None
+            if selected_emp_name is None or selected_emp_name == "Select all":
+                selected_emp_id = None
+            else:
+                selected_emp_id = emp_labels.get(selected_emp_name)
 
         with col_proj:
             all_projs = get_all_projects()
@@ -153,8 +156,12 @@ def render_timesheet_page(user):
             all_projs = all_projs.sort_values(by=['job_no_numeric', 'project_code'], ascending=[False, False])
             
             proj_options = {f"{r['project_code']} - {r['project_name']}": r['project_code'] for _, r in all_projs.iterrows()}
-            selected_proj_name = st.selectbox("Project", ["All"] + list(proj_options.keys()), key="filter_proj")
-            selected_proj_code = proj_options[selected_proj_name] if selected_proj_name != "All" else None
+            selected_proj_name = st.selectbox("Project", ["Select all"] + list(proj_options.keys()), index=None, placeholder="All Projects", key="filter_proj")
+            
+            if selected_proj_name is None or selected_proj_name == "Select all":
+                selected_proj_code = None
+            else:
+                selected_proj_code = proj_options[selected_proj_name]
         
         with col_clear:
             st.markdown('<div class="filter-label-phantom">&nbsp;</div>', unsafe_allow_html=True)

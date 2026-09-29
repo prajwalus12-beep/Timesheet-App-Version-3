@@ -89,17 +89,18 @@ def render_import_page():
             [[
                 "852", "1", "St Paul's College Trip Payment", "Not started", "Kritika Wadhwa", 
                 "https://trello.com/...", "https://slack.com/...", "https://figma.com/...", 
-                "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1", "166", "117"
+                "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1", "166", "117",
+                "Initial scope review complete. Awaiting client sign-off."
             ]],
             columns=[
                 'Job No', 'Job Priority', 'Priority', 'Search_Project', 'Lead engineer', 
                 'Trello', 'Slack', 'Prototype', 'Start Date', 'Finish Date', 'Current Phase_g',
                 'CheckBoxe BC', 'CheckBoxe Trello', 'CheckBoxe WA', 'CheckBoxe WS',
-                'Estimated Days', 'Actual Days'
+                'Estimated Days', 'Actual Days', 'Notes'
             ]
         )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority' (numeric), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS).")
+        st.info("Required: 'Job No', 'Job Priority' (numeric), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS). Optional: 'Notes' column for project notes.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Row 3: Holiday Import ---
