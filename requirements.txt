@@ -13,4 +13,3 @@ openpyxl
 reportlab
 APScheduler>=3.10.0
 plotly>=5.0.0
-kaleido

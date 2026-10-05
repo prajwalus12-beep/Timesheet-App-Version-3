@@ -728,6 +728,216 @@ def get_project_reports():
         return pd.DataFrame()
     return pd.DataFrame(data)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADD PROJECT — CRUD Functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_add_projects():
+    """Fetch all records from the add_project table, newest first."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return pd.DataFrame()
+    try:
+        res = supabase.table('add_project').select('*').order('created_at', desc=True).execute()
+        data = res.data or []
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        # Ensure boolean column is consistent
+        if 'fmp_added' in df.columns:
+            df['fmp_added'] = df['fmp_added'].fillna(False).astype(bool)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def create_add_project(project_data: dict, user_emp_id: str, user_name: str):
+    """Insert a new row into add_project.
+
+    Parameters
+    ----------
+    project_data : dict   Field values (project_name required; all others optional)
+    user_emp_id  : str    employee_id of the creator
+    user_name    : str    Display name of the creator
+    Returns (success: bool, message: str, new_id: int | None)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error", None
+
+    if not project_data.get('project_name', '').strip():
+        return False, "Project Name is required.", None
+
+    payload = {
+        'project_name':    str(project_data.get('project_name', '')).strip(),
+        'project_code':    str(project_data.get('project_code', '')).strip() or None,
+        'priority':        project_data.get('priority') or None,
+        'status':          project_data.get('status') or 'Not started',
+        'lead_engineer':   project_data.get('lead_engineer') or None,
+        'phase':           project_data.get('phase') or None,
+        'trello_link':     project_data.get('trello_link') or None,
+        'prototype_link':  project_data.get('prototype_link') or None,
+        'slack_link':      project_data.get('slack_link') or None,
+        'estimated_days':  project_data.get('estimated_days') or None,
+        'actual_days':     project_data.get('actual_days') or None,
+        'start_date':      project_data.get('start_date') or None,
+        'end_date':        project_data.get('end_date') or None,
+        'checkbox_bc':     project_data.get('checkbox_bc'),
+        'checkbox_trello': project_data.get('checkbox_trello'),
+        'checkbox_wa':     project_data.get('checkbox_wa'),
+        'checkbox_ws':     project_data.get('checkbox_ws'),
+        'notes':           project_data.get('notes') or None,
+        'created_by_id':   user_emp_id,
+        'created_by_name': user_name,
+        'updated_by_id':   user_emp_id,
+        'updated_by_name': user_name,
+        'fmp_added':       False,
+    }
+
+    try:
+        res = supabase.table('add_project').insert(payload).execute()
+        new_id = res.data[0]['id'] if res.data else None
+        return True, "Project created successfully.", new_id
+    except Exception as e:
+        return False, str(e), None
+
+
+def update_add_project(record_id: int, project_data: dict, user_emp_id: str, user_name: str):
+    """Update an existing add_project record.
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+
+    if not project_data.get('project_name', '').strip():
+        return False, "Project Name is required."
+
+    payload = {
+        'project_name':    str(project_data.get('project_name', '')).strip(),
+        'project_code':    str(project_data.get('project_code', '')).strip() or None,
+        'priority':        project_data.get('priority') or None,
+        'status':          project_data.get('status') or 'Not started',
+        'lead_engineer':   project_data.get('lead_engineer') or None,
+        'phase':           project_data.get('phase') or None,
+        'trello_link':     project_data.get('trello_link') or None,
+        'prototype_link':  project_data.get('prototype_link') or None,
+        'slack_link':      project_data.get('slack_link') or None,
+        'estimated_days':  project_data.get('estimated_days') or None,
+        'actual_days':     project_data.get('actual_days') or None,
+        'start_date':      project_data.get('start_date') or None,
+        'end_date':        project_data.get('end_date') or None,
+        'checkbox_bc':     project_data.get('checkbox_bc'),
+        'checkbox_trello': project_data.get('checkbox_trello'),
+        'checkbox_wa':     project_data.get('checkbox_wa'),
+        'checkbox_ws':     project_data.get('checkbox_ws'),
+        'notes':           project_data.get('notes') or None,
+        'updated_by_id':   user_emp_id,
+        'updated_by_name': user_name,
+        # updated_at is auto-set by the DB trigger
+    }
+
+    try:
+        supabase.table('add_project').update(payload).eq('id', record_id).execute()
+        return True, "Project updated successfully."
+    except Exception as e:
+        return False, str(e)
+
+
+def mark_fmp_added(record_ids: list, user_emp_id: str, user_name: str):
+    """Mark a list of add_project records as Added in FMP.
+
+    Parameters
+    ----------
+    record_ids : list[int]   Primary keys to mark
+    user_emp_id, user_name   Admin who is marking them
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+
+    if not record_ids:
+        return False, "No records selected."
+
+    import datetime
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    payload = {
+        'fmp_added':       True,
+        'fmp_added_at':    now_iso,
+        'fmp_added_by_id':   user_emp_id,
+        'fmp_added_by_name': user_name,
+    }
+
+    try:
+        supabase.table('add_project').update(payload).in_('id', record_ids).execute()
+        return True, f"{len(record_ids)} project(s) marked as Added in FMP."
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_add_project(record_id: int):
+    """Hard-delete an add_project record.
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+    try:
+        supabase.table('add_project').delete().eq('id', record_id).execute()
+        return True, "Project deleted."
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_add_projects_bulk(record_ids: list):
+    """Hard-delete multiple add_project records at once.
+
+    Parameters
+    ----------
+    record_ids : list[int]   Primary keys to delete
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+    if not record_ids:
+        return False, "No records selected."
+    try:
+        supabase.table('add_project').delete().in_('id', record_ids).execute()
+        return True, f"{len(record_ids)} project(s) deleted."
+    except Exception as e:
+        return False, str(e)
+
+
+def check_project_code_exists(project_code: str, exclude_id: int = None) -> bool:
+    """Return True if the given project_code already exists in add_project.
+
+    Parameters
+    ----------
+    project_code : str   The code to check
+    exclude_id   : int   If provided, exclude this record (for edit scenarios)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+    if not project_code or not str(project_code).strip():
+        return False
+    try:
+        query = supabase.table('add_project').select('id').eq('project_code', str(project_code).strip())
+        if exclude_id is not None:
+            query = query.neq('id', exclude_id)
+        res = query.execute()
+        return bool(res.data)
+    except Exception:
+        return False
+
+
 def _parse_date_value(val):
     """Convert an Excel date cell value to an ISO date string, or None if blank."""
     if val is None:

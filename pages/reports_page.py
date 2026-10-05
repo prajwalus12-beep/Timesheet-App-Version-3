@@ -4,8 +4,24 @@ import pandas as pd
 import json
 import io
 
-from database.queries import get_all_employees, get_timesheets, get_all_projects, get_all_holidays
+from database.queries import get_all_employees, get_timesheets, get_all_projects, get_all_holidays, get_project_reports
 from utils.date_helpers import get_curr_cycle_dates
+from utils.chart_helpers import (
+    convert_hours_to_days,
+    format_days_display,
+    format_project_employee_initials,
+    wrap_project_name,
+    format_date_short,
+    build_project_metadata_text,
+    build_charts_pdf_report
+)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_project_reports():
+    try:
+        return get_project_reports()
+    except Exception:
+        return pd.DataFrame()
 
 def render_reports_page(user):
     hdr_col, exp_col = st.columns([6.5, 3.5])
@@ -212,7 +228,6 @@ def render_reports_page(user):
         # ── Charts & Analytics ────────────────────────────────────────────────
         try:
             import plotly.graph_objects as go
-            import plotly.express as px
 
             # Prepare chart data from the filtered timesheet data
             # Exclude LEAVE and HOLIDAY project codes from chart data
@@ -231,290 +246,327 @@ def render_reports_page(user):
                 # chart_exp_col used later after charts are built
 
                 # Display charts stacked vertically for maximum readability
-                # ── Pie Chart: Hours distribution by Project ──────────────────
-                pie_df = (
-                    chart_data.groupby('project_name', as_index=False)['hours']
-                    .sum()
-                    .sort_values('hours', ascending=False)
-                )
-                # Limit to top 10 projects for readability; group rest as "Other"
-                if len(pie_df) > 10:
-                    top10 = pie_df.head(10)
-                    other_h = pie_df.iloc[10:]['hours'].sum()
-                    if other_h > 0:
-                        other_row = pd.DataFrame([{'project_name': 'Other', 'hours': other_h}])
-                        pie_df = pd.concat([top10, other_row], ignore_index=True)
-                    else:
-                        pie_df = top10
+                # ── Shared Project Data for Charts ────────────────────────────
+                pr_df = _cached_project_reports()
+                pr_map = {}
+                pr_name_map = {}
+                if pr_df is not None and not pr_df.empty:
+                    for _, pr_r in pr_df.iterrows():
+                        c = str(pr_r.get('project_code', '')).strip()
+                        n = str(pr_r.get('project_name', '')).strip().lower()
+                        d = pr_r.to_dict()
+                        if c:
+                            pr_map[c] = d
+                        if n:
+                            pr_name_map[n] = d
 
-                # Add percentage + hours + days to project names for the legend
-                total_pie_hours = pie_df['hours'].sum()
+                project_records = []
+                for p_name, group in chart_data.groupby('project_name'):
+                    h = group['hours'].sum()
+                    if h <= 0:
+                        continue
+                    days = convert_hours_to_days(h)
+                    codes = [str(c).strip() for c in group['project_code'].dropna().unique() if str(c).strip()]
+                    p_code = codes[0] if codes else ""
+                    emp_names = group['emp_name'].dropna().unique().tolist()
+                    ts_statuses = [str(s).strip() for s in group['project_status'].dropna().unique() if str(s).strip() and str(s).strip().lower() not in ('nan', 'none', '_', '')]
+                    ts_status = ts_statuses[-1] if ts_statuses else ""
 
-                def _pie_legend_label(row):
-                    h = row['hours']
-                    pct = (h / total_pie_hours * 100) if total_pie_hours > 0 else 0
-                    days = int(h // 8)
-                    rem_h = h % 8
-                    day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
-                    raw_name = str(row['project_name'])
-                    display_name = raw_name if len(raw_name) <= 45 else raw_name[:42] + '...'
-                    return f"{display_name}  ·  {h:.1f}h ({day_str})  {pct:.1f}%"
+                    pr_rec = pr_map.get(p_code)
+                    if not pr_rec:
+                        pr_rec = pr_name_map.get(str(p_name).strip().lower(), {})
 
-                pie_labels = pie_df.apply(_pie_legend_label, axis=1)
+                    start_date = pr_rec.get('start_date') if pr_rec else None
+                    end_date = pr_rec.get('end_date') if pr_rec else None
+                    status = (pr_rec.get('status') if pr_rec and pd.notna(pr_rec.get('status')) else None) or ts_status
 
-                # Customdata for hover: [hours, days_str, percent, full_project_name]
+                    project_records.append({
+                        'project_name': p_name,
+                        'project_code': p_code,
+                        'hours': h,
+                        'days': days,
+                        'emp_names': emp_names,
+                        'initials': format_project_employee_initials(emp_names),
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'start_str': format_date_short(start_date),
+                        'end_str': format_date_short(end_date),
+                        'status': status
+                    })
+
+                sorted_proj_records = sorted(project_records, key=lambda x: x['days'], reverse=True)
+                total_project_days = sum(p['days'] for p in sorted_proj_records)
+
+                # ── Pie Chart: Distribution by Project (Days) ──────────────────
+                def _pie_legend_label(project_name, meta_txt, wrap_width=42):
+                    wrapped = wrap_project_name(project_name, width=wrap_width, html=True)
+                    return f"{wrapped}<br>{meta_txt}"
+
+                pie_rows = []
+                pie_source = sorted_proj_records
+                other_days = 0.0
+                if len(sorted_proj_records) > 10:
+                    pie_source = sorted_proj_records[:10]
+                    other_days = sum(p['days'] for p in sorted_proj_records[10:])
+
+                for p in pie_source:
+                    pct = (p['days'] / total_project_days * 100) if total_project_days > 0 else 0
+                    meta_txt = build_project_metadata_text(
+                        p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
+                    )
+                    pie_rows.append({
+                        'project_name': p['project_name'],
+                        'display_name': p['project_name'],
+                        'days': p['days'],
+                        'pct': pct,
+                        'metadata_text': meta_txt,
+                        'legend_label': _pie_legend_label(p['project_name'], meta_txt),
+                    })
+                if other_days > 0:
+                    other_pct = (other_days / total_project_days * 100) if total_project_days > 0 else 0
+                    other_meta = f"{format_days_display(other_days)} ({other_pct:.1f}%)"
+                    pie_rows.append({
+                        'project_name': 'Other',
+                        'display_name': 'Other',
+                        'days': other_days,
+                        'pct': other_pct,
+                        'metadata_text': other_meta,
+                        'legend_label': _pie_legend_label('Other', other_meta),
+                    })
+
+                pie_df = pd.DataFrame(pie_rows)
+
                 pie_customdata = []
+                legend_line_count = 0
                 for _, row in pie_df.iterrows():
-                    h = row['hours']
-                    pct = (h / total_pie_hours * 100) if total_pie_hours > 0 else 0
-                    days = int(h // 8)
-                    rem_h = h % 8
-                    day_str = f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
-                    pie_customdata.append([h, day_str, pct, str(row['project_name'])])
+                    d_str = format_days_display(row['days'])
+                    pct = row['pct']
+                    p_name = str(row['project_name'])
+                    meta = str(row['metadata_text'])
+                    pie_customdata.append([d_str, pct, p_name, meta])
+                    legend_line_count += max(2, 1 + str(row['legend_label']).count('<br>'))
 
+                # ── Pie Chart: Left column, Legend: Right column ───────────────
+                # This matches the PDF layout exactly: donut on the left,
+                # rich text legend panel on the right.
+                num_pie_slices = len(pie_df)
+
+                # Pastel palette matching the PDF
+                PIE_COLORS = [
+                    '#8dd3c7','#ffffb3','#bebada','#fb8072','#80b1d3',
+                    '#fdb462','#b3de69','#fccde5','#d9d9d9','#bc80bd','#ccebc5'
+                ]
+
+                # Build the pie figure (occupies the left column)
                 fig_pie = go.Figure(go.Pie(
-                    labels=pie_labels,
-                    values=pie_df['hours'],
+                    labels=pie_df['project_name'],   # plain text — no HTML
+                    values=pie_df['days'],
                     hole=0.40,
-                    domain=dict(x=[0.0, 0.38], y=[0.0, 1.0]),
                     customdata=pie_customdata,
                     textinfo='percent',
                     textposition='inside',
                     insidetextorientation='horizontal',
                     texttemplate='<b>%{percent:.1%}</b>',
-                    textfont=dict(size=12, color='#1e293b'),
+                    textfont=dict(size=13, color='#1e293b'),
                     hovertemplate=(
-                        '<b>%{customdata[3]}</b><br>'
-                        'Hours: <b>%{customdata[0]:.1f}h</b><br>'
-                        'Days: <b>%{customdata[1]}</b><br>'
-                        'Share: <b>%{customdata[2]:.1f}%</b>'
+                        '<b>%{customdata[2]}</b><br>'
+                        '%{customdata[3]}'
                         '<extra></extra>'
                     ),
                     marker=dict(
-                        colors=px.colors.qualitative.Set3,
-                        line=dict(color='#ffffff', width=1.5)
-                    )
+                        colors=PIE_COLORS[:num_pie_slices],
+                        line=dict(color='#ffffff', width=2)
+                    ),
+                    showlegend=False,
+                    sort=False,   # Other stays last
                 ))
+
                 fig_pie.update_layout(
                     title=dict(
                         text='<b>Total Value by Project</b>',
-                        font=dict(size=20, color='#1e293b'),
-                        x=0
-                    ),
-                    showlegend=True,
-                    legend=dict(
-                        font=dict(size=12),
-                        x=0.42,
-                        y=0.5,
-                        yanchor='middle',
+                        font=dict(size=17, color='#1e293b'),
+                        x=0,
                         xanchor='left',
-                        tracegroupgap=4,
                     ),
-                    margin=dict(l=10, r=10, t=50, b=20),
-                    height=max(500, len(pie_df) * 38 + 90),
+                    margin=dict(l=10, r=10, t=50, b=10),
+                    height=460,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                     uniformtext=dict(mode='hide', minsize=10),
-                )
-                st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart")
-
-                st.markdown("<br><br>", unsafe_allow_html=True)
-
-                # ── Bar Chart: Total Hours per Project ────────────────────────
-                bar_df = (
-                    chart_data.groupby('project_name', as_index=False)['hours']
-                    .sum()
-                    .sort_values('hours', ascending=False)
-                    .head(20)  # Top 20 projects
+                    autosize=True,
                 )
 
-                bar_total = bar_df['hours'].sum()
+                # Build legend HTML items (matching PDF: bold name + metadata line)
+                legend_items_html = []
+                for i, row in pie_df.iterrows():
+                    color = PIE_COLORS[i % len(PIE_COLORS)]
+                    proj_name = str(row['project_name'])
+                    meta = str(row['metadata_text'])
+                    legend_items_html.append(
+                        f'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">'
+                        f'<div style="width:13px;height:13px;min-width:13px;background:{color};'
+                        f'border:1px solid #bbb;border-radius:2px;margin-top:3px;"></div>'
+                        f'<div>'
+                        f'<div style="font-weight:700;font-size:0.8rem;color:#1e293b;'
+                        f'line-height:1.3;word-break:break-word;">{proj_name}</div>'
+                        f'<div style="font-size:0.72rem;color:#475569;line-height:1.4;'
+                        f'word-break:break-word;">{meta}</div>'
+                        f'</div></div>'
+                    )
 
-                def _bar_day_str(h):
-                    days = int(h // 8)
-                    rem_h = h % 8
-                    return f"{days}d {rem_h:.1f}h" if rem_h else f"{days}d"
+                # Side-by-side: pie left (55%), legend right (45%)
+                pie_col, legend_col = st.columns([55, 45])
+                with pie_col:
+                    st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart")
+                with legend_col:
+                    st.markdown(
+                        '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
+                        'padding:14px 16px;margin-top:4px;max-height:480px;overflow-y:auto;">'
+                        + "".join(legend_items_html)
+                        + '</div>',
+                        unsafe_allow_html=True
+                    )
 
-                bar_pct = bar_df['hours'].apply(
-                    lambda h: (h / bar_total * 100) if bar_total > 0 else 0
-                )
-                bar_day_strs = bar_df['hours'].apply(_bar_day_str)
+                st.markdown("<br>", unsafe_allow_html=True)
 
-                # Label shown on bar: hours | days | %
-                bar_text = [
-                    f"{h:.1f}h  ({_bar_day_str(h)})  {pct:.1f}%"
-                    for h, pct in zip(bar_df['hours'], bar_pct)
-                ]
+                # ── Bar Chart: Total Value by Project (Days) ──────────────────
+                if project_records:
+                    bar_top20 = sorted_proj_records[:20]
+                    bar_total_days = sum(p['days'] for p in bar_top20)
+                    bar_rows = []
+                    for p in bar_top20:
+                        pct = (p['days'] / bar_total_days * 100) if bar_total_days > 0 else 0
+                        meta_txt = build_project_metadata_text(
+                            p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
+                        )
+                        wrapped = wrap_project_name(p['project_name'], width=38, html=True)
+                        bar_rows.append({
+                            'project_name': p['project_name'],
+                            'project_code': p['project_code'],
+                            'hours': p['hours'],
+                            'days': p['days'],
+                            'pct': pct,
+                            'initials': p['initials'],
+                            'start_str': p['start_str'],
+                            'end_str': p['end_str'],
+                            'status': p['status'],
+                            'metadata_text': meta_txt,
+                            'wrapped_name': wrapped,
+                        })
+                    bar_df = pd.DataFrame(bar_rows)
 
-                # Customdata: [day_str, percent]
-                bar_customdata = list(zip(bar_day_strs, bar_pct.round(1)))
+                    # Customdata for hover: [full_name, formatted_days, metadata_text]
+                    bar_customdata = list(zip(
+                        bar_df['project_name'],
+                        [format_days_display(d) for d in bar_df['days']],
+                        bar_df['metadata_text']
+                    ))
 
-                fig_bar = go.Figure(go.Bar(
-                    x=bar_df['hours'],
-                    y=bar_df['project_name'],
-                    orientation='h',
-                    customdata=bar_customdata,
-                    cliponaxis=False,
-                    marker=dict(
-                        color=bar_df['hours'],
-                        colorscale='Blues',
-                        showscale=False,
-                        line=dict(color='rgba(58,134,255,0.6)', width=1)
-                    ),
-                    hovertemplate=(
-                        '<b>%{y}</b><br>'
-                        'Hours: <b>%{x:.1f}h</b><br>'
-                        'Days: <b>%{customdata[0]}</b><br>'
-                        'Share: <b>%{customdata[1]:.1f}%</b>'
-                        '<extra></extra>'
-                    ),
-                    text=bar_text,
-                    textposition='outside',
-                    textfont=dict(size=12, color='#0f172a')
-                ))
-                # Extend x-axis range to give outside labels enough room
-                bar_max = bar_df['hours'].max() if not bar_df.empty else 1
-                x_range_max = bar_max * 1.65  # 65% headroom for the longest label
+                    fig_bar = go.Figure(go.Bar(
+                        x=bar_df['days'],
+                        y=bar_df['project_name'],
+                        orientation='h',
+                        customdata=bar_customdata,
+                        cliponaxis=False,
+                        marker=dict(
+                            color=bar_df['days'],
+                            colorscale='Blues',
+                            showscale=False,
+                            line=dict(color='rgba(58,134,255,0.5)', width=0.5)
+                        ),
+                        hovertemplate=(
+                            '<b>%{customdata[0]}</b><br>'
+                            '%{customdata[2]}'
+                            '<extra></extra>'
+                        ),
+                        text=None,
+                        textposition='none',
+                    ))
 
-                fig_bar.update_layout(
-                    title=dict(
-                        text='<b>Total Value by Project (Top 20)</b>',
-                        font=dict(size=20, color='#1e293b'),
-                        x=0
-                    ),
-                    xaxis=dict(
-                        title=dict(text='Hours', font=dict(size=16)),
-                        gridcolor='#f1f5f9',
-                        zeroline=False,
-                        tickfont=dict(size=13),
-                        range=[0, x_range_max],
-                    ),
-                    yaxis=dict(
-                        autorange='reversed',
-                        tickfont=dict(size=13),
-                        showgrid=False,
-                    ),
-                    margin=dict(l=0, r=20, t=50, b=50),
-                    height=max(500, len(bar_df) * 45 + 100),
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    bargap=0.3,
-                    uniformtext=dict(mode='hide', minsize=9),
-                )
-                st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+                    # Plotly annotation per bar — shows full metadata text
+                    # matching the PDF: "6.9d (13.0%) — SD, SH | Start: 31 Jul | End: 31 Jul | Complete"
+                    bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
+                    bar_annotations = []
+                    for _, brow in bar_df.iterrows():
+                        bar_annotations.append(dict(
+                            x=brow['days'],
+                            y=brow['project_name'],
+                            text=f"  {brow['metadata_text']}",
+                            showarrow=False,
+                            xanchor='left',
+                            yanchor='middle',
+                            font=dict(size=11, color='#1e293b'),
+                            xref='x',
+                            yref='y',
+                        ))
 
-                # ── Export Charts as PDF ──────────────────────────────────────
+                    # Estimate characters in the longest annotation to set x-axis range.
+                    # At ~6.5px per char, font-size 11 in a ~1200px wide container:
+                    # 1px ≈ (bar_max / chart_width_px) data-units.
+                    # We use a conservative 4x multiplier so text never clips.
+                    max_meta_len = max((len(str(r)) for r in bar_df['metadata_text']), default=40)
+                    # Each char ≈ 0.13 * bar_max_days of horizontal space (empirical)
+                    text_width_units = max_meta_len * 0.13 * (bar_max_days / 10)
+                    x_range_max = bar_max_days + max(bar_max_days * 2.2, text_width_units * 1.5, 1.0)
+
+                    bar_height = max(500, len(bar_df) * 42 + 100)
+                    fig_bar.update_layout(
+                        title=dict(
+                            text='<b>Total Value by Project (Top 20)</b>',
+                            font=dict(size=18, color='#1e293b'),
+                            x=0,
+                            xanchor='left',
+                        ),
+                        xaxis=dict(
+                            title=dict(text='Days', font=dict(size=13, color='#475569')),
+                            gridcolor='#f1f5f9',
+                            zeroline=False,
+                            tickfont=dict(size=11, color='#64748b'),
+                            range=[0, x_range_max],
+                            automargin=True,
+                        ),
+                        yaxis=dict(
+                            autorange='reversed',
+                            tickfont=dict(size=11, color='#1e293b'),
+                            showgrid=False,
+                            automargin=True,
+                        ),
+                        annotations=bar_annotations,
+                        margin=dict(l=20, r=20, t=55, b=50),
+                        height=bar_height,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        bargap=0.35,
+                        autosize=True,
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+                else:
+                    st.info("No project data available for the selected filters.")
+                    bar_df = pd.DataFrame()
+
+                # ── Export Charts as PDF (ReportLab server-side, zero Chrome/Kaleido) ──
                 with chart_exp_col:
                     st.markdown('<div style="margin-top:1.6rem"></div>', unsafe_allow_html=True)
                     try:
-                        import kaleido  # noqa: F401 – availability check
-                        from reportlab.lib.pagesizes import A4, landscape
-                        from reportlab.lib.units import cm
-                        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                        from reportlab.lib.enums import TA_CENTER
-                        from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Paragraph, Spacer, PageBreak
-                        from reportlab.lib import colors
-
-                        def _build_charts_pdf():
-                            """Render both figures to PNG via kaleido, then embed in a 2-page landscape PDF."""
-                            pdf_buf = io.BytesIO()
-                            doc = SimpleDocTemplate(
-                                pdf_buf,
-                                pagesize=landscape(A4),
-                                leftMargin=1.5*cm, rightMargin=1.5*cm,
-                                topMargin=1.2*cm, bottomMargin=1.2*cm,
-                            )
-                            pw = landscape(A4)[0] - 3.0*cm   # usable width (~756.8pt)
-
-                            styles = getSampleStyleSheet()
-                            title_style = ParagraphStyle(
-                                'ChartTitle',
-                                parent=styles['Heading1'],
-                                fontSize=15,
-                                leading=18,
-                                textColor=colors.HexColor('#0f172a'),
-                                alignment=TA_CENTER,
-                                spaceAfter=3,
-                            )
-                            sub_style = ParagraphStyle(
-                                'ChartSub',
-                                parent=styles['Normal'],
-                                fontSize=9,
-                                leading=12,
-                                textColor=colors.HexColor('#64748b'),
-                                alignment=TA_CENTER,
-                                spaceAfter=8,
-                            )
-
-                            story = []
-
-                            # ── Page 1: Pie Chart (Distribution by Project) ───
-                            story.append(Paragraph('<b>📈 Timesheet Analytics — Hours Distribution by Project</b>', title_style))
-                            story.append(Paragraph(
-                                f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
-                                sub_style
-                            ))
-                            story.append(Spacer(1, 0.2*cm))
-
-                            # Render pie chart for PDF – full landscape width matching UI
-                            f_pie_pdf = go.Figure(fig_pie)
-                            f_pie_pdf.update_layout(
-                                paper_bgcolor='white',
-                                plot_bgcolor='white',
-                                width=1100,
-                                height=520,
-                                margin=dict(l=15, r=15, t=40, b=20),
-                            )
-                            pie_png = f_pie_pdf.to_image(format='png', scale=2)
-                            pie_w = pw
-                            pie_h = pie_w * (520 / 1100)
-                            story.append(RLImage(io.BytesIO(pie_png), width=pie_w, height=pie_h))
-
-                            # ── Page 2: Bar Chart (Total Hours per Project) ───
-                            story.append(PageBreak())
-                            story.append(Paragraph('<b>📊 Timesheet Analytics — Total Value by Project (Top 20)</b>', title_style))
-                            story.append(Paragraph(
-                                f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
-                                sub_style
-                            ))
-                            story.append(Spacer(1, 0.2*cm))
-
-                            # Render bar chart for PDF with fixed landscape aspect ratio
-                            f_bar_pdf = go.Figure(fig_bar)
-                            f_bar_pdf.update_layout(
-                                paper_bgcolor='white',
-                                plot_bgcolor='white',
-                                width=1100,
-                                height=620,
-                                margin=dict(l=20, r=30, t=30, b=40),
-                            )
-                            bar_png = f_bar_pdf.to_image(format='png', scale=2)
-
-                            # Clamp height to fit comfortably on Page 2 without overflowing
-                            max_bar_h = 450.0
-                            bar_w = pw
-                            bar_h = bar_w * (620 / 1100)
-                            if bar_h > max_bar_h:
-                                bar_h = max_bar_h
-                                bar_w = bar_h * (1100 / 620)
-
-                            story.append(RLImage(io.BytesIO(bar_png), width=bar_w, height=bar_h))
-
-                            doc.build(story)
-                            return pdf_buf.getvalue()
-
                         fname = f"charts_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
+                        pdf_bytes = build_charts_pdf_report(
+                            r_start,
+                            r_end,
+                            pie_df,
+                            total_project_days,
+                            bar_df
+                        )
                         st.download_button(
                             label="📄 Export PDF",
-                            data=_build_charts_pdf,
+                            data=pdf_bytes,
                             file_name=fname,
                             mime="application/pdf",
                             use_container_width=True,
                         )
-                    except ImportError:
-                        st.info("Install `kaleido` to enable PDF export: `pip install kaleido`")
                     except Exception as _pdf_err:
-                        st.warning(f"PDF export failed: {_pdf_err}")
+                        st.error(f"⚠️ PDF generation failed: {_pdf_err}")
+            else:
+                st.info("No project data available for the selected filters.")
 
 
 
