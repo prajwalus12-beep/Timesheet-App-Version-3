@@ -3,6 +3,10 @@ node_modules/
 .venv/
 .env
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 dist/
 # build/ (Removed to allow Streamlit Cloud deployment of React components)
 automaticmanualtesting.py
