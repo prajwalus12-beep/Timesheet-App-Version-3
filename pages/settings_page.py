@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 from database.queries import (
-    get_all_users, update_project_update_access, get_app_setting, set_app_setting,
+    get_all_users, update_project_update_access, update_add_project_access, get_app_setting, set_app_setting,
     get_all_holidays
 )
 from utils.lockout_helpers import get_lockout_schedule, save_lockout_schedule
@@ -126,8 +126,17 @@ def render_settings_page(user=None):
 
                 changes_made = False
                 
+                # Header row for permission columns
+                h_col1, h_col2, h_col3 = st.columns([3, 1.2, 1.5])
+                with h_col1:
+                    st.markdown("<span style='font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase;'>Employee</span>", unsafe_allow_html=True)
+                with h_col2:
+                    st.markdown("<span style='font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase;'>Project Update</span>", unsafe_allow_html=True)
+                with h_col3:
+                    st.markdown("<span style='font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase;'>Add Project</span>", unsafe_allow_html=True)
+
                 for idx, row in manageable_users.iterrows():
-                    col1, col2 = st.columns([4, 1])
+                    col1, col2, col3 = st.columns([3, 1.2, 1.5])
                     
                     with col1:
                         st.markdown(f"""
@@ -139,7 +148,6 @@ def render_settings_page(user=None):
                         
                     with col2:
                         current_access = bool(row['project_update_access'])
-                        # Using checkbox as requested
                         new_access = st.checkbox(
                             "Allow Edit", 
                             value=current_access, 
@@ -149,15 +157,29 @@ def render_settings_page(user=None):
                         if new_access != current_access:
                             success, msg = update_project_update_access(row['employee_id'], new_access)
                             if success:
-                                st.toast(f"✅ Access updated for {row['employee_name']}", icon="🔒")
+                                st.toast(f"✅ Edit access updated for {row['employee_name']}", icon="🔒")
+                                changes_made = True
+                            else:
+                                st.error(f"Error: {msg}")
+
+                    with col3:
+                        current_add_access = bool(row.get('allow_add_project', False))
+                        new_add_access = st.checkbox(
+                            "Allow to Add Project",
+                            value=current_add_access,
+                            key=f"add_project_access_{row['employee_id']}"
+                        )
+
+                        if new_add_access != current_add_access:
+                            success, msg = update_add_project_access(row['employee_id'], new_add_access)
+                            if success:
+                                st.toast(f"✅ 'Allow to Add Project' updated for {row['employee_name']}", icon="➕")
                                 changes_made = True
                             else:
                                 st.error(f"Error: {msg}")
 
                 if changes_made:
-                    # Note: In a real app we might want to force a refresh of the user's session if they are logged in.
-                    # For now, this updates the DB immediately.
-                    pass
+                    st.rerun()
 
                 st.divider()
                 st.info("💡 **Tip:** Administrators always have full access to all modules and cannot be restricted.")

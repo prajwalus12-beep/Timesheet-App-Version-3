@@ -131,11 +131,17 @@ def render_sidebar(user):
         """, unsafe_allow_html=True)
 
         # --- Navigation Menu using radio ---
-        if user["role"] == "admin":
+        from database.queries import get_employee_add_project_access
+        is_admin = user.get("role") == "admin"
+        can_add_project = is_admin or get_employee_add_project_access(user.get("employee_id"))
+
+        if is_admin:
             options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings"]
         else:
             # All employees can see Project Update (edit vs view-only controlled by access flag)
-            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project"]
+            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2"]
+            if can_add_project:
+                options.append("➕  Add Project")
 
         page_map = {
             "📋  Timesheet": "Timesheet Entries",

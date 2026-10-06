@@ -109,13 +109,17 @@ def login_user(username, password):
         
         if verify_password(password, db_pw):
             if failed > 0: update_user_lockout(username, 0, None)
+            from database.queries import get_employee_add_project_access
+            is_admin = uname.lower() in ["admin", "system administrator"]
+            allow_add = True if is_admin else get_employee_add_project_access(emp_id)
             return {
                 "id": uid, 
                 "employee_id": emp_id, 
                 "employee_name": emp_name,
                 "username": uname, 
-                "role": "admin" if uname.lower() in ["admin", "system administrator"] else "employee",
-                "project_update_access": access
+                "role": "admin" if is_admin else "employee",
+                "project_update_access": access,
+                "allow_add_project": allow_add
             }
         else:
             new_failed = failed + 1

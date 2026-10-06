@@ -15,11 +15,14 @@ from database.queries import (
     create_add_project,
     update_add_project,
     mark_fmp_added,
+    mark_projects_exported,
+    mark_projects_non_exported,
     delete_add_project,
     delete_add_projects_bulk,
     check_project_code_exists,
     get_all_employees,
-    is_employee_active
+    is_employee_active,
+    get_employee_add_project_access
 )
 
 from components.add_project_react import project_update_component
@@ -85,12 +88,21 @@ def _safe_date(v):
 
 
 def _format_cb(v):
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return 'TRUE'
-    s = str(v).strip()
-    if s in ('1', '1.0'):
-        return 'FALSE'
-    return 'TRUE'
+    if pd.isna(v) or v is None:
+        return True
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ('1', '1.0', 'false', 'no', 'unchecked'):
+        return False
+    if s in ('nan', 'none', 'nat', '', '0', '0.0', 'true', 'yes', 'checked'):
+        return True
+    try:
+        if float(s) == 1.0:
+            return False
+    except (ValueError, TypeError):
+        pass
+    return True
 
 
 def _generate_fmp_excel(df: pd.DataFrame) -> bytes:
@@ -235,7 +247,7 @@ def _generate_ts_excel(df: pd.DataFrame) -> bytes:
 
 @st.dialog("Export Add Projects")
 def export_dialog(df):
-    st.write("Select the export format:")
+    st.write(f"Select the export format ({len(df)} project(s)):")
     
     ts_now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     c1, c2 = st.columns(2)
@@ -286,6 +298,21 @@ def _prepare_projects_list(df):
                         record[col] = str(val)
                 else:
                     record[col] = str(val) if val is not None else None
+        
+        # Ensure is_exported is accurately parsed as a boolean
+        exp_val = row.get('is_exported')
+        fmp_val = row.get('fmp_added')
+
+        def _to_bool(v):
+            if v is None or pd.isna(v):
+                return False
+            if isinstance(v, bool):
+                return v
+            s = str(v).strip().lower()
+            return s in ('true', '1', 'yes', 't')
+
+        record['is_exported'] = _to_bool(exp_val) or _to_bool(fmp_val)
+        record['fmp_added'] = _to_bool(fmp_val)
         projects_list.append(record)
     return projects_list
 
@@ -326,6 +353,11 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
 
     if action == "save":
         is_admin = user.get("role") == "admin"
+        can_add = is_admin or get_employee_add_project_access(user.get("employee_id"))
+        if not can_add:
+            st.error("⛔ Permission Denied: You do not have permission to add or modify projects.")
+            return
+
         if not is_admin and not is_employee_active(user.get("employee_id")):
             st.error("Employee is inactive. This action is not available for inactive employees.")
             return
@@ -413,13 +445,69 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
         st.session_state[f"code_exists_{code}"] = exists
 
     elif action == "open_export_modal":
-        export_dialog(df)
+        payload = result.get("payload", {})
+        displayed_ids = payload.get("displayedIds")
+        displayed_codes = payload.get("displayedProjectCodes")
+        
+        export_df = df
+        if displayed_ids is not None and 'id' in df.columns:
+            str_ids = {str(i).strip() for i in displayed_ids if i is not None and str(i).strip()}
+            matched_df = df[df['id'].astype(str).str.strip().isin(str_ids)].copy()
+            if not matched_df.empty:
+                export_df = matched_df
+            elif displayed_codes and 'project_code' in df.columns:
+                str_codes = {str(c).strip() for c in displayed_codes if c is not None and str(c).strip()}
+                export_df = df[df['project_code'].astype(str).str.strip().isin(str_codes)].copy()
+        elif displayed_codes is not None and 'project_code' in df.columns:
+            str_codes = {str(c).strip() for c in displayed_codes if c is not None and str(c).strip()}
+            export_df = df[df['project_code'].astype(str).str.strip().isin(str_codes)].copy()
+        else:
+            export_df = df
+        export_dialog(export_df)
+
+    elif action == "mark_as_exported":
+        if user.get("role") != "admin":
+            st.error("Permission denied: Only Admin users can mark projects as exported.")
+            return
+        record_ids = result.get("record_ids", [])
+        if record_ids:
+            with st.spinner("Marking project(s) as exported…"):
+                ok, msg = mark_projects_exported(record_ids, user.get("employee_id"), user.get("employee_name"))
+            if ok:
+                _invalidate_cache()
+                st.success(f"✅ {msg}")
+                st.session_state['ap_react_refresh'] = refresh_key + 1
+                st.rerun()
+            else:
+                st.error(f"❌ Error: {msg}")
+
+    elif action == "mark_as_non_exported":
+        if user.get("role") != "admin":
+            st.error("Permission denied: Only Admin users can mark projects as non-exported.")
+            return
+        record_ids = result.get("record_ids", [])
+        if record_ids:
+            with st.spinner("Marking project(s) as non-exported…"):
+                ok, msg = mark_projects_non_exported(record_ids, user.get("employee_id"), user.get("employee_name"))
+            if ok:
+                _invalidate_cache()
+                st.success(f"✅ {msg}")
+                st.session_state['ap_react_refresh'] = refresh_key + 1
+                st.rerun()
+            else:
+                st.error(f"❌ Error: {msg}")
 
 
 def render_add_project_page(user):
     st.subheader("Add Project", divider="blue")
 
     is_admin = user.get("role") == "admin"
+    can_add = is_admin or get_employee_add_project_access(user.get("employee_id"))
+    if not can_add:
+        st.error("⛔ Access Denied: You do not have permission to access the Add Project page.")
+        st.info("Please contact your administrator to grant you the 'Allow to Add Project' permission under Settings → Employee Permissions.")
+        return
+
     is_active = is_employee_active(user.get("employee_id")) if not is_admin else True
     read_only = not (is_admin or is_active)
 

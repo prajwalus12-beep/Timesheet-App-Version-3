@@ -72,5 +72,11 @@ else:
     elif page == "Reports": render_reports_page(user)
     elif page == "Import Data": render_import_page()
     elif page == "Project Update": render_project_update_page_v2(user)
-    elif page == "Add Project": render_add_project_page(user)
+    elif page == "Add Project":
+        from database.queries import get_employee_add_project_access
+        can_add = user.get("role") == "admin" or get_employee_add_project_access(user.get("employee_id"))
+        if can_add:
+            render_add_project_page(user)
+        else:
+            st.error("⛔ Access Denied: You do not have permission to access the Add Project page.")
     elif page == "Settings": render_settings_page(user)

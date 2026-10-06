@@ -1,7 +1,20 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Streamlit, withStreamlitConnection } from "streamlit-component-lib";
-import { ExternalLink, Search, Filter, Download, X, Info, Save, Link, ChevronDown, ChevronUp, Send, Trash2 } from "lucide-react";
+import { ExternalLink, Search, Filter, Download, X, Info, Save, Link, ChevronDown, ChevronUp, Send, Trash2, CheckCircle, RotateCcw } from "lucide-react";
 import "./styles.css";
+
+// ---- Required and Editable Fields Constants ----
+const REQUIRED_FIELDS = ["project_code", "project_name", "lead_engineer", "start_date", "end_date", "estimated_days"];
+const REQUIRED_LABELS = {
+  project_code: "Project Code", project_name: "Project Name",
+  lead_engineer: "Lead Engineer", start_date: "Start Date",
+  end_date: "Est. Date", estimated_days: "Est. Days"
+};
+const EDITABLE_FIELDS = [
+  "project_code", "project_name", "lead_engineer", "priority", "start_date", "end_date",
+  "status", "trello_link", "prototype_link", "slack_link",
+  "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days", "notes"
+];
 
 function ProjectUpdateComponent(props) {
   const { args } = props;
@@ -13,8 +26,19 @@ function ProjectUpdateComponent(props) {
   const isAddMode = args.is_add_mode || false;
   const employees = args.employees || [];
 
+  // Helper to normalize and add immutable _uid to each project
+  const normalizeProject = useCallback((p, idx = 0) => {
+    const isExported = p.is_exported === true || p.is_exported === "true" || p.fmp_added === true || p.fmp_added === "true";
+    return {
+      ...p,
+      _uid: p.id != null ? `proj_id_${p.id}` : (p._uid || `new_uid_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 7)}`),
+      is_exported: isExported,
+      project_code: p.project_code != null ? String(p.project_code) : ""
+    };
+  }, []);
+
   const [projects, setProjects] = useState(() => {
-    return [...serverProjects].sort((a, b) => {
+    return serverProjects.map((p, i) => normalizeProject(p, i)).sort((a, b) => {
       const codeA = parseInt((a.project_code || "0").replace(/\D/g, ""), 10) || 0;
       const codeB = parseInt((b.project_code || "0").replace(/\D/g, ""), 10) || 0;
       return codeB - codeA;
@@ -26,27 +50,41 @@ function ProjectUpdateComponent(props) {
     const newKey = JSON.stringify(serverProjects);
     if (prevServerRef.current !== newKey) {
       prevServerRef.current = newKey;
-      const sorted = [...serverProjects].sort((a, b) => {
+      const sorted = serverProjects.map((p, i) => normalizeProject(p, i)).sort((a, b) => {
         const codeA = parseInt((a.project_code || "0").replace(/\D/g, ""), 10) || 0;
         const codeB = parseInt((b.project_code || "0").replace(/\D/g, ""), 10) || 0;
         return codeB - codeA;
       });
-      setProjects(sorted);
+      // Retain any new, unsaved project rows that were being filled out
+      setProjects(prev => {
+        const unsaved = prev.filter(p => p._isNew);
+        return [...unsaved, ...sorted];
+      });
       setSelectedIds(new Set());
     }
-  }, [serverProjects]);
+  }, [serverProjects, normalizeProject]);
 
-  // ---- Multi-select / delete state ----
+  // ---- Multi-select / delete / export state ----
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  // Build set of existing project codes for duplicate detection
-  const existingProjectCodes = useMemo(() => {
-    const s = new Set();
-    serverProjects.forEach(p => { if (p.project_code) s.add(String(p.project_code).trim().toLowerCase()); });
-    return s;
-  }, [serverProjects]);
+  // Duplicate project code detector
+  const isDuplicateCode = useCallback((project) => {
+    const code = String(project.project_code || "").trim().toLowerCase();
+    if (!code) return false;
+    // Check against server-persisted projects
+    const inServer = serverProjects.some(sp => {
+      if (project.id != null && sp.id === project.id) return false;
+      return String(sp.project_code || "").trim().toLowerCase() === code;
+    });
+    if (inServer) return true;
+    // Check against other projects currently in state
+    return projects.some(other => {
+      if (other._uid === project._uid) return false;
+      return String(other.project_code || "").trim().toLowerCase() === code;
+    });
+  }, [serverProjects, projects]);
 
   const isAdmin = String(args.user_role || "").toLowerCase() === "admin";
   const [filterName, setFilterName] = useState("");
@@ -58,9 +96,11 @@ function ProjectUpdateComponent(props) {
   const [filterStatus, setFilterStatus] = useState(isAdmin ? [] : ["In progress", "In testing", "To be deployed"]);
   const [filterUpdatedOnly, setFilterUpdatedOnly] = useState(false);
   const [filterShowCompleted, setFilterShowCompleted] = useState(false);
+  const [filterExportStatus, setFilterExportStatus] = useState("non-exported"); // "all" | "exported" | "non-exported"
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState([]);
-  // Field-level errors: { [projectCode]: { [fieldName]: errorMessage } }
+  
+  // Field-level errors: { [projectUid]: { [fieldName]: errorMessage } }
   const [fieldErrors, setFieldErrors] = useState({});
 
   const [sortField, setSortField] = useState("project_code");
@@ -79,7 +119,10 @@ function ProjectUpdateComponent(props) {
 
   const serverProjectsMap = useMemo(() => {
     const map = new Map();
-    serverProjects.forEach(p => map.set(p.project_code, p));
+    serverProjects.forEach(p => {
+      if (p.id != null) map.set(p.id, p);
+      if (p.project_code) map.set(String(p.project_code), p);
+    });
     return map;
   }, [serverProjects]);
 
@@ -93,6 +136,10 @@ function ProjectUpdateComponent(props) {
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
+      // Export Status Radio Filter
+      if (filterExportStatus === "exported" && !p.is_exported) return false;
+      if (filterExportStatus === "non-exported" && p.is_exported) return false;
+
       if (filterName) {
         const nameMatch = (p.project_name || "").toLowerCase().includes(filterName.toLowerCase());
         const codeMatch = (p.project_code || "").toLowerCase().includes(filterName.toLowerCase());
@@ -109,7 +156,7 @@ function ProjectUpdateComponent(props) {
           if (filterPriorityMax && pVal > parseFloat(filterPriorityMax)) return false;
         } else if (filterPriorityMin || filterPriorityMax) return false;
       }
-      const server = serverProjectsMap.get(p.project_code);
+      const server = (p.id != null ? serverProjectsMap.get(p.id) : null) || serverProjectsMap.get(String(p.project_code));
       const originalStatus = server ? server.status : p.status;
       if (filterStatus.length > 0 && !filterStatus.includes(originalStatus)) return false;
       const isComplete = originalStatus === "Complete";
@@ -119,7 +166,7 @@ function ProjectUpdateComponent(props) {
       if (filterUpdatedOnly && !hasUpdate) return false;
       return true;
     });
-  }, [projects, serverProjectsMap, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted]);
+  }, [projects, serverProjectsMap, filterExportStatus, filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted]);
 
   const sortedProjects = useMemo(() => {
     return [...filteredProjects].sort((a, b) => {
@@ -144,10 +191,13 @@ function ProjectUpdateComponent(props) {
     setFilterName(""); setFilterCodeMin(""); setFilterCodeMax("");
     setFilterLead(""); setFilterPriorityMin(""); setFilterPriorityMax("");
     setFilterStatus([]); setFilterUpdatedOnly(false); setFilterShowCompleted(false);
+    setFilterExportStatus("non-exported");
   };
 
   const [displayCount, setDisplayCount] = useState(30);
-  useEffect(() => { setDisplayCount(30); }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted, projects, sortField, sortOrder]);
+  useEffect(() => {
+    setDisplayCount(30);
+  }, [filterName, filterCodeMin, filterCodeMax, filterLead, filterPriorityMin, filterPriorityMax, filterStatus, filterUpdatedOnly, filterShowCompleted, filterExportStatus, projects, sortField, sortOrder]);
 
   const handleScroll = (e) => {
     const { scrollHeight, scrollTop, clientHeight } = e.target;
@@ -156,28 +206,93 @@ function ProjectUpdateComponent(props) {
     }
   };
 
-  const handleUpdate = (projectCode, field, value) => {
-    setProjects(prev => prev.map(p => p.project_code === projectCode ? { ...p, [field]: value } : p));
+  // Date helper to parse UTC days
+  const parseDateToUtcDays = (dateVal) => {
+    if (!dateVal) return null;
+    if (dateVal instanceof Date) {
+      if (isNaN(dateVal.getTime())) return null;
+      return Date.UTC(dateVal.getFullYear(), dateVal.getMonth(), dateVal.getDate()) / 86400000;
+    }
+    const s = String(dateVal).split("T")[0].trim();
+    if (!s) return null;
+
+    // Check YYYY-MM-DD
+    const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoMatch) {
+      const y = parseInt(isoMatch[1], 10);
+      const m = parseInt(isoMatch[2], 10) - 1;
+      const d = parseInt(isoMatch[3], 10);
+      return Date.UTC(y, m, d) / 86400000;
+    }
+
+    // Check DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmyMatch) {
+      const d = parseInt(dmyMatch[1], 10);
+      const m = parseInt(dmyMatch[2], 10) - 1;
+      const y = parseInt(dmyMatch[3], 10);
+      return Date.UTC(y, m, d) / 86400000;
+    }
+
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) {
+      return Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()) / 86400000;
+    }
+    return null;
+  };
+
+  // EST = End Date − Start Date (excluding start date itself)
+  const calculateEstDays = (startDate, endDate) => {
+    const d1 = parseDateToUtcDays(startDate);
+    const d2 = parseDateToUtcDays(endDate);
+    if (d1 === null || d2 === null) return null;
+    const diff = Math.round(d2 - d1);
+    return diff >= 0 ? diff : 0;
+  };
+
+  // Safe row-specific update identified by unique immutable _uid
+  const handleUpdate = (projectUid, field, value) => {
+    setProjects(prev => prev.map(p => {
+      if (p._uid !== projectUid) return p;
+      const updated = { ...p, [field]: value };
+      if (field === "start_date" || field === "end_date") {
+        const sDate = field === "start_date" ? value : p.start_date;
+        const eDate = field === "end_date" ? value : p.end_date;
+        if (sDate && eDate) {
+          const est = calculateEstDays(sDate, eDate);
+          if (est !== null) {
+            updated.estimated_days = est;
+          }
+        }
+      }
+      return updated;
+    }));
+
     if (value && String(value).trim()) {
       setFieldErrors(prev => {
         const updated = { ...prev };
-        if (updated[projectCode]) {
-          const copy = { ...updated[projectCode] };
+        if (updated[projectUid]) {
+          const copy = { ...updated[projectUid] };
           delete copy[field];
-          updated[projectCode] = copy;
+          if (field === "start_date" || field === "end_date") {
+            delete copy.estimated_days;
+          }
+          updated[projectUid] = copy;
         }
         return updated;
       });
     }
   };
 
-  const isDirty = (projectCode, field) => {
-    const local = projects.find(p => p.project_code === projectCode);
-    if (!local) return false;
-    if (local._isNew) return !!local[field];
-    const server = serverProjects.find(p => p.project_code === projectCode);
+
+  const isDirty = (project, field) => {
+    if (!project) return false;
+    if (project._isNew) return !!project[field];
+    const server = (project.id != null ? serverProjectsMap.get(project.id) : null) || serverProjectsMap.get(String(project.project_code));
     if (!server) return false;
-    return String(server[field] ?? "") !== String(local[field] ?? "");
+    const sVal = server[field] === null || server[field] === undefined ? "" : String(server[field]).trim();
+    const pVal = project[field] === null || project[field] === undefined ? "" : String(project[field]).trim();
+    return sVal !== pVal;
   };
 
   const isDbUpdated = (project, field) => {
@@ -185,35 +300,102 @@ function ProjectUpdateComponent(props) {
     return flag === true || flag === "true" || flag === "True";
   };
 
-  const editedCount = useMemo(() => {
-    return projects.filter(p => {
-      if (p._isNew) return true;
-      const server = serverProjects.find(sp => sp.project_code === p.project_code);
-      return server && JSON.stringify(server) !== JSON.stringify(p);
-    }).length;
-  }, [projects, serverProjects]);
+  const isProjectDirty = useCallback((p) => {
+    if (!p) return false;
+    if (p._isNew) {
+      return EDITABLE_FIELDS.some(f => p[f] !== undefined && p[f] !== null && String(p[f]).trim() !== "");
+    }
+    const server = (p.id != null ? serverProjectsMap.get(p.id) : null) || serverProjectsMap.get(String(p.project_code));
+    if (!server) return false;
+    return EDITABLE_FIELDS.some(f => {
+      const sVal = server[f] === null || server[f] === undefined ? "" : String(server[f]).trim();
+      const pVal = p[f] === null || p[f] === undefined ? "" : String(p[f]).trim();
+      return sVal !== pVal;
+    });
+  }, [serverProjectsMap]);
 
-  // ---- Delete helpers ----
-  const toggleSelectProject = (recordId) => {
+  const editedCount = useMemo(() => {
+    return projects.filter(p => isProjectDirty(p)).length;
+  }, [projects, isProjectDirty]);
+
+  const hasUnfilledRequired = useMemo(() => {
+    const dirtyProjects = projects.filter(p => isProjectDirty(p));
+    if (dirtyProjects.length === 0) return false;
+    return dirtyProjects.some(p => {
+      return REQUIRED_FIELDS.some(f => {
+        const val = p[f];
+        return val === undefined || val === null || String(val).trim() === "";
+      });
+    });
+  }, [projects, isProjectDirty]);
+
+  // ---- Selection helpers ----
+  const toggleSelectProject = (projectIdOrUid) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      if (next.has(recordId)) next.delete(recordId); else next.add(recordId);
+      if (next.has(projectIdOrUid)) next.delete(projectIdOrUid); else next.add(projectIdOrUid);
       return next;
     });
   };
 
-  const visibleIds = sortedProjects.slice(0, displayCount).map(p => p.id).filter(id => id != null);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
-  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id));
+  const visibleSelectableIds = sortedProjects.slice(0, displayCount).map(p => p.id != null ? p.id : p._uid);
+  const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id => selectedIds.has(id));
+  const someVisibleSelected = visibleSelectableIds.some(id => selectedIds.has(id));
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
-      setSelectedIds(prev => { const next = new Set(prev); visibleIds.forEach(id => next.delete(id)); return next; });
+      setSelectedIds(prev => { const next = new Set(prev); visibleSelectableIds.forEach(id => next.delete(id)); return next; });
     } else {
-      setSelectedIds(prev => { const next = new Set(prev); visibleIds.forEach(id => next.add(id)); return next; });
+      setSelectedIds(prev => { const next = new Set(prev); visibleSelectableIds.forEach(id => next.add(id)); return next; });
     }
   };
 
+  // ---- Mark as Exported handler ----
+  const handleMarkAsExported = () => {
+    if (selectedIds.size === 0) {
+      alert("Please select one or more project records from the list to mark as exported.");
+      return;
+    }
+    // Only persistable records with DB ids can be updated on server
+    const savedRecordIds = [...selectedIds]
+      .map(id => projects.find(p => p.id === id || p._uid === id))
+      .filter(p => p && !p._isNew && p.id != null)
+      .map(p => p.id);
+
+    if (savedRecordIds.length === 0) {
+      alert("Selected new project(s) must be saved first before marking them as exported.");
+      return;
+    }
+
+    Streamlit.setComponentValue({
+      action: "mark_as_exported",
+      record_ids: savedRecordIds
+    });
+  };
+
+  // ---- Mark as Non-Exported handler ----
+  const handleMarkAsNonExported = () => {
+    if (selectedIds.size === 0) {
+      alert("Please select one or more project records from the list to mark as non-exported.");
+      return;
+    }
+    const savedRecordIds = [...selectedIds]
+      .map(id => projects.find(p => p.id === id || p._uid === id))
+      .filter(p => p && !p._isNew && p.id != null)
+      .map(p => p.id);
+
+    if (savedRecordIds.length === 0) {
+      alert("Selected new project(s) must be saved first before marking them as non-exported.");
+      return;
+    }
+
+    Streamlit.setComponentValue({
+      action: "mark_as_non_exported",
+      record_ids: savedRecordIds
+    });
+  };
+
+  // ---- Delete helpers ----
   const handleDeleteSingle = (project) => { setDeleteTarget(project); setShowDeleteConfirm(true); };
   const handleDeleteSelected = () => { if (selectedIds.size === 0) return; setDeleteTarget(null); setShowDeleteConfirm(true); };
 
@@ -221,33 +403,27 @@ function ProjectUpdateComponent(props) {
     let recordIds = [];
     if (deleteTarget) {
       if (deleteTarget._isNew) {
-        setProjects(prev => prev.filter(p => p.project_code !== deleteTarget.project_code));
+        setProjects(prev => prev.filter(p => p._uid !== deleteTarget._uid));
         setShowDeleteConfirm(false); setDeleteTarget(null); return;
       }
       recordIds = [deleteTarget.id];
     } else {
-      const newRowCodes = [...selectedIds]
-        .map(id => projects.find(p => p.id === id))
-        .filter(p => p && p._isNew).map(p => p.project_code);
-      if (newRowCodes.length > 0)
-        setProjects(prev => prev.filter(p => !newRowCodes.includes(p.project_code)));
-      recordIds = [...selectedIds].filter(id => {
-        const p = projects.find(p2 => p2.id === id);
-        return p && !p._isNew;
-      });
+      const newRowUids = [...selectedIds]
+        .map(id => projects.find(p => p.id === id || p._uid === id))
+        .filter(p => p && p._isNew).map(p => p._uid);
+      if (newRowUids.length > 0)
+        setProjects(prev => prev.filter(p => !newRowUids.includes(p._uid)));
+      recordIds = [...selectedIds]
+        .map(id => projects.find(p => p.id === id || p._uid === id))
+        .filter(p => p && !p._isNew && p.id != null)
+        .map(p => p.id);
     }
     setShowDeleteConfirm(false); setDeleteTarget(null); setSelectedIds(new Set());
     if (recordIds.length > 0) Streamlit.setComponentValue({ action: "delete_projects", record_ids: recordIds });
   };
 
   // ---- Required field validation ----
-  const REQUIRED_FIELDS = ["project_code", "project_name", "lead_engineer", "start_date", "end_date", "estimated_days"];
-  const REQUIRED_LABELS = {
-    project_code: "Project Code", project_name: "Project Name",
-    lead_engineer: "Lead Engineer", start_date: "Start Date",
-    end_date: "Est. Date", estimated_days: "Est. Days"
-  };
-  const getFieldError = (projectCode, field) => fieldErrors[projectCode]?.[field] || null;
+  const getFieldError = (projectUid, field) => fieldErrors[projectUid]?.[field] || null;
 
   // ---- Save ----
   const handleSave = useCallback(() => {
@@ -258,7 +434,7 @@ function ProjectUpdateComponent(props) {
     projects.forEach(p => {
       let server;
       if (!p._isNew) {
-        server = serverProjects.find(sp => sp.project_code === p.project_code);
+        server = (p.id != null ? serverProjectsMap.get(p.id) : null) || serverProjectsMap.get(String(p.project_code));
         if (!server) return;
       }
       const changes = {};
@@ -272,10 +448,14 @@ function ProjectUpdateComponent(props) {
         changes["project_code"] = p.project_code;
         editableFields.forEach(f => { if (p[f] !== undefined && p[f] !== "") changes[f] = p[f]; });
       } else {
+        changes["id"] = p.id;
+        changes["project_code"] = p.project_code;
         editableFields.forEach(f => { if (String(server[f] ?? "") !== String(p[f] ?? "")) changes[f] = p[f]; });
       }
 
-      if (Object.keys(changes).length > 0 && (p._isNew || Object.keys(changes).length > 1 || !changes["_isNew"])) {
+      const hasFieldChanges = p._isNew ? Object.keys(changes).length > 1 : Object.keys(changes).some(k => k !== "id" && k !== "project_code");
+
+      if (hasFieldChanges || p._isNew) {
         const errs = [];
         const isUnchecked = v => v === 1 || v === "1" || v === 1.0 || v === "1.0";
 
@@ -289,20 +469,17 @@ function ProjectUpdateComponent(props) {
               errs.push(`${REQUIRED_LABELS[f]} is required`);
             }
           });
-          if (Object.keys(reqErrs).length > 0) newFieldErrors[p.project_code] = reqErrs;
 
-          // Frontend duplicate project code check
+          // Duplicate project code check
           const code = String(p.project_code || "").trim();
-          if (code && !code.startsWith("new_") && existingProjectCodes.has(code.toLowerCase())) {
-            errs.push(`Project Code "${code}" already exists — use a unique code`);
-            newFieldErrors[p.project_code] = {
-              ...(newFieldErrors[p.project_code] || {}),
-              project_code: `Code "${code}" already exists`
-            };
+          if (code && isDuplicateCode(p)) {
+            errs.push(`Project Code "${code}" already exists — please use a unique code`);
+            reqErrs["project_code"] = `Code "${code}" already exists`;
           }
+          if (Object.keys(reqErrs).length > 0) newFieldErrors[p._uid] = reqErrs;
         }
 
-        if (p._isNew && (!p.project_code || p.project_code.startsWith("new_"))) errs.push("Job No is required for new projects");
+        if (p._isNew && (!p.project_code || !String(p.project_code).trim())) errs.push("Project Code is required for new projects");
         if (!p.start_date) errs.push("Missing start date");
         if (!p.end_date) errs.push("Missing End Date");
         if (p.start_date && p.end_date && new Date(p.start_date) > new Date(p.end_date)) errs.push("Start Date must be <= End Date");
@@ -320,8 +497,8 @@ function ProjectUpdateComponent(props) {
         if (isUnchecked(p.checkbox_ws)) errs.push("WS checkbox not checked");
 
         const uniqueErrs = [...new Set(errs)];
-        if (uniqueErrs.length > 0) vErrors.push({ projectCode: p.project_code, name: p.project_name, errors: uniqueErrs });
-        edits[p.project_code] = changes;
+        if (uniqueErrs.length > 0) vErrors.push({ projectCode: p.project_code || "New Project", name: p.project_name, errors: uniqueErrs });
+        edits[p.project_code || p._uid] = changes;
       }
     });
 
@@ -333,9 +510,19 @@ function ProjectUpdateComponent(props) {
     }
     setValidationErrors([]);
     if (Object.keys(edits).length > 0) Streamlit.setComponentValue({ action: "save", edits });
-  }, [projects, serverProjects, existingProjectCodes]);
+  }, [projects, serverProjectsMap, isDuplicateCode]);
 
-  const handleExportClick = () => Streamlit.setComponentValue({ action: "open_export_modal" });
+  const handleExportClick = () => {
+    const displayedProjectCodes = filteredProjects.map(p => String(p.project_code));
+    const displayedIds = filteredProjects.filter(p => p.id != null).map(p => p.id);
+    Streamlit.setComponentValue({
+      action: "open_export_modal",
+      payload: {
+        displayedProjectCodes,
+        displayedIds
+      }
+    });
+  };
   const handleOpenReminderModal = () => {
     const displayedProjectCodes = filteredProjects.map(p => String(p.project_code));
     Streamlit.setComponentValue({ action: "open_reminder_modal", payload: { displayedProjectCodes } });
@@ -344,25 +531,23 @@ function ProjectUpdateComponent(props) {
   // ---- Cell class helpers ----
   const isFieldEmpty = v => !v || v.toString().trim() === "";
 
-  const cellInputClass = (projectCode, field, value, extra = "") => {
+  const cellInputClass = (project, field, value, extra = "") => {
     let cls = "pu-cell-input";
     if (extra) cls += " " + extra;
-    if (isDirty(projectCode, field)) cls += " dirty";
-    const proj = projects.find(p => p.project_code === projectCode);
-    if (proj && !proj._isNew && !isDirty(projectCode, field) && isDbUpdated(proj, field)) cls += " db-updated";
+    if (isDirty(project, field)) cls += " dirty";
+    if (!project._isNew && !isDirty(project, field) && isDbUpdated(project, field)) cls += " db-updated";
     if (isFieldEmpty(value)) cls += " pu-highlight-empty";
-    if (getFieldError(projectCode, field)) cls += " pu-field-error";
+    if (getFieldError(project._uid, field)) cls += " pu-field-error";
     return cls;
   };
 
-  const cellSelectClass = (projectCode, field, value, extra = "") => {
+  const cellSelectClass = (project, field, value, extra = "") => {
     let cls = "pu-cell-select";
     if (extra) cls += " " + extra;
-    if (isDirty(projectCode, field)) cls += " dirty";
-    const proj = projects.find(p => p.project_code === projectCode);
-    if (proj && !proj._isNew && !isDirty(projectCode, field) && isDbUpdated(proj, field)) cls += " db-updated";
+    if (isDirty(project, field)) cls += " dirty";
+    if (!project._isNew && !isDirty(project, field) && isDbUpdated(project, field)) cls += " db-updated";
     if (isFieldEmpty(value)) cls += " pu-highlight-empty";
-    if (getFieldError(projectCode, field)) cls += " pu-field-error";
+    if (getFieldError(project._uid, field)) cls += " pu-field-error";
     return cls;
   };
 
@@ -424,7 +609,7 @@ function ProjectUpdateComponent(props) {
   const DeleteConfirmDialog = () => {
     const isMulti = !deleteTarget;
     const count = isMulti ? selectedIds.size : 1;
-    const name = deleteTarget ? (deleteTarget.project_name || deleteTarget.project_code) : null;
+    const name = deleteTarget ? (deleteTarget.project_name || deleteTarget.project_code || "Unnamed Project") : null;
     return (
       <div className="pu-modal-overlay" onClick={() => { setShowDeleteConfirm(false); setDeleteTarget(null); }}>
         <div className="pu-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: "24rem" }}>
@@ -472,16 +657,44 @@ function ProjectUpdateComponent(props) {
           <h1 className="pu-title">Project Attributes</h1>
           <div className="pu-header-actions">
             <span className="pu-count-label">
-              Showing {filteredProjects.length} incomplete project status records of {projects.length} projects.
+              Showing {filteredProjects.length} records of {projects.length} total.
             </span>
             {!readOnly && !isCompact && editedCount > 0 && (
               <button className="pu-save-btn" onClick={handleSave}><Save size={16} /> Save Changes ({editedCount})</button>
             )}
             {!readOnly && !isCompact && isAddMode && (
               <button className="pu-save-btn" onClick={() => {
-                const newProj = { project_code: "new_" + Math.random().toString(36).substr(2, 9), project_name: "", status: "Not started", _isNew: true };
-                setProjects([newProj, ...projects]);
+                const newProj = {
+                  _uid: `new_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`,
+                  project_code: "",
+                  project_name: "",
+                  status: "Not started",
+                  priority: "2",
+                  is_exported: false,
+                  _isNew: true
+                };
+                setProjects(prev => [newProj, ...prev]);
               }}>&#10133; Add Project</button>
+            )}
+            {/* Mark as Exported Button - Admin only */}
+            {!readOnly && !isCompact && isAdmin && (
+              <button
+                className={`pu-mark-exported-btn ${selectedIds.size === 0 ? "disabled" : ""}`}
+                onClick={handleMarkAsExported}
+                title="Mark selected project records as Exported"
+              >
+                <CheckCircle size={16} /> Mark as Exported {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              </button>
+            )}
+            {/* Mark as Non-Exported Button - Admin only */}
+            {!readOnly && !isCompact && isAdmin && (
+              <button
+                className={`pu-mark-non-exported-btn ${selectedIds.size === 0 ? "disabled" : ""}`}
+                onClick={handleMarkAsNonExported}
+                title="Mark selected project records as Non-Exported"
+              >
+                <RotateCcw size={16} /> Mark as Non - Exported {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              </button>
             )}
             {!readOnly && !isCompact && selectedIds.size > 0 && (
               <button onClick={handleDeleteSelected}
@@ -515,10 +728,10 @@ function ProjectUpdateComponent(props) {
           </div>
         )}
 
-        {/* ── Unsaved Changes Banner ── */}
-        {!readOnly && !isCompact && editedCount > 0 && (
+        {/* ── Unsaved Changes Warning Banner (only appears if required fields are not filled) ── */}
+        {!readOnly && !isCompact && editedCount > 0 && hasUnfilledRequired && (
           <div className="pu-unsaved-banner">
-            <span>⚠ You have {editedCount} unsaved change(s).</span>
+            <span>⚠ Please fill all required fields before saving ({editedCount} unsaved project(s)).</span>
             <button className="pu-save-btn" onClick={handleSave} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>
               <Save size={14} /> Save
             </button>
@@ -575,6 +788,8 @@ function ProjectUpdateComponent(props) {
                   <button className="pu-clear-btn" onClick={resetFilters} title="Clear all filters">Clear</button>
                 </div>
               </div>
+
+
               {!isCompact && (
                 <div className="pu-filter-group pu-filter-group--full">
                   <label className="pu-filter-label">Quick Filters</label>
@@ -596,25 +811,69 @@ function ProjectUpdateComponent(props) {
           )}
         </div>
 
-        {/* ── Sort Controls ── */}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "12px", padding: "10px 15px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginRight: "5px", letterSpacing: "0.05em" }}>Sort By:</span>
-          {[
-            { key: "project_code", label: "PROJECT CODE" },
-            { key: "project_name", label: "PROJECT NAME" },
-            ...(!isCompact ? [{ key: "start_date", label: "START DATE" }, { key: "end_date", label: "END DATE" }] : [])
-          ].map(s => (
-            <button key={s.key} onClick={() => handleSort(s.key)} style={{
-              padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700",
-              border: sortField === s.key ? "1px solid #3b82f6" : "1px solid #cbd5e1",
-              background: sortField === s.key ? "#eff6ff" : "#ffffff",
-              color: sortField === s.key ? "#1d4ed8" : "#475569",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
-              boxShadow: "0 1px 2px 0 rgba(0,0,0,0.05)", textTransform: "uppercase"
-            }}>
-              {s.label} {sortField === s.key && (sortOrder === "asc" ? "▲" : "▼")}
-            </button>
-          ))}
+        {/* ── Prominent Radio Buttons Filter & Sort Bar ── */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "12px", padding: "10px 15px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          
+          {/* Quick Radio Filter for Export Status */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Export Status:
+            </span>
+            <div className="pu-radio-group" style={{ padding: 0 }}>
+              <label className={`pu-radio-item ${filterExportStatus === "all" ? "active" : ""}`}>
+                <input
+                  type="radio"
+                  name="quickExportFilter"
+                  value="all"
+                  checked={filterExportStatus === "all"}
+                  onChange={() => setFilterExportStatus("all")}
+                />
+                <span>All Records</span>
+              </label>
+              <label className={`pu-radio-item ${filterExportStatus === "exported" ? "active" : ""}`}>
+                <input
+                  type="radio"
+                  name="quickExportFilter"
+                  value="exported"
+                  checked={filterExportStatus === "exported"}
+                  onChange={() => setFilterExportStatus("exported")}
+                />
+                <span>Exported Records</span>
+              </label>
+              <label className={`pu-radio-item ${filterExportStatus === "non-exported" ? "active" : ""}`}>
+                <input
+                  type="radio"
+                  name="quickExportFilter"
+                  value="non-exported"
+                  checked={filterExportStatus === "non-exported"}
+                  onChange={() => setFilterExportStatus("non-exported")}
+                />
+                <span>Non-Exported Records</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Sort Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>Sort By:</span>
+            {[
+              { key: "project_code", label: "PROJECT CODE" },
+              { key: "project_name", label: "PROJECT NAME" },
+              ...(!isCompact ? [{ key: "start_date", label: "START DATE" }, { key: "end_date", label: "END DATE" }] : [])
+            ].map(s => (
+              <button key={s.key} onClick={() => handleSort(s.key)} style={{
+                padding: "6px 14px", borderRadius: "6px", fontSize: "0.75rem", fontWeight: "700",
+                border: sortField === s.key ? "1px solid #3b82f6" : "1px solid #cbd5e1",
+                background: sortField === s.key ? "#eff6ff" : "#ffffff",
+                color: sortField === s.key ? "#1d4ed8" : "#475569",
+                cursor: "pointer", display: "flex", alignItems: "center", gap: "6px",
+                boxShadow: "0 1px 2px 0 rgba(0,0,0,0.05)", textTransform: "uppercase"
+              }}>
+                {s.label} {sortField === s.key && (sortOrder === "asc" ? "▲" : "▼")}
+              </button>
+            ))}
+          </div>
+
         </div>
 
         {/* ── Data Table ── */}
@@ -656,21 +915,20 @@ function ProjectUpdateComponent(props) {
               <tbody>
                 {sortedProjects.length > 0 ? (
                   sortedProjects.slice(0, displayCount).map((project, index) => {
-                    const isSelected = project.id != null && selectedIds.has(project.id);
-                    const projFieldErrs = fieldErrors[project.project_code] || {};
-                    const isDupCode = project._isNew && project.project_code
-                      && !project.project_code.startsWith("new_")
-                      && existingProjectCodes.has(String(project.project_code).trim().toLowerCase());
+                    const selectKey = project.id != null ? project.id : project._uid;
+                    const isSelected = selectedIds.has(selectKey);
+                    const projFieldErrs = fieldErrors[project._uid] || {};
+                    const isDupCode = project._isNew && isDuplicateCode(project);
 
                     return (
-                      <React.Fragment key={project.project_code}>
+                      <React.Fragment key={project._uid}>
                         <tr className={`pu-row-primary${isSelected ? " pu-row-selected" : ""}`}>
 
                           {/* Checkbox */}
                           {!readOnly && !isCompact && isAddMode && (
                             <td style={{ textAlign: "center", padding: "0.375rem 0.25rem", verticalAlign: "middle" }}>
                               <input type="checkbox" checked={isSelected}
-                                onChange={() => toggleSelectProject(project.id)}
+                                onChange={() => toggleSelectProject(selectKey)}
                                 style={{ cursor: "pointer", width: "15px", height: "15px" }} />
                             </td>
                           )}
@@ -682,42 +940,44 @@ function ProjectUpdateComponent(props) {
                           <td className="td-code">
                             {project._isNew ? (
                               <div>
-                                <input type="text"
-                                  value={project.project_code.startsWith("new_") ? "" : project.project_code}
-                                  onChange={e => {
-                                    const raw = e.target.value;
-                                    const newCode = raw || project.project_code;
-                                    setProjects(prev => prev.map(p =>
-                                      p.project_code === project.project_code ? { ...p, project_code: newCode } : p
-                                    ));
-                                    if (raw) {
-                                      setFieldErrors(prev => {
-                                        const u = { ...prev };
-                                        if (u[project.project_code]) {
-                                          const c = { ...u[project.project_code] }; delete c.project_code; u[project.project_code] = c;
-                                        }
-                                        return u;
-                                      });
-                                    }
-                                  }}
+                                <input
+                                  type="text"
+                                  value={project.project_code || ""}
+                                  onChange={e => handleUpdate(project._uid, "project_code", e.target.value)}
                                   className={`pu-cell-input${projFieldErrs.project_code || isDupCode ? " pu-field-error" : ""}`}
                                   placeholder="Job No *"
-                                  style={{ width: "80px", padding: "4px" }}
+                                  style={{ width: "85px", padding: "4px" }}
                                 />
-                                {projFieldErrs.project_code && <div className="pu-field-error-msg">{projFieldErrs.project_code}</div>}
-                                {isDupCode && !projFieldErrs.project_code && <div className="pu-field-error-msg">⚠ Code already exists</div>}
+                                {isDupCode && (
+                                  <div className="pu-field-error-msg" style={{ color: "#dc2626", fontSize: "0.72rem", marginTop: "3px", fontWeight: 600 }}>
+                                    ⚠ Project Code "{project.project_code}" already exists
+                                  </div>
+                                )}
+                                {projFieldErrs.project_code && !isDupCode && (
+                                  <div className="pu-field-error-msg">{projFieldErrs.project_code}</div>
+                                )}
                               </div>
                             ) : (
-                              <b>{project.project_code || ""}</b>
+                              <div>
+                                <b>{project.project_code || ""}</b>
+                              </div>
                             )}
+                            {/* Visual Export Status Badge */}
+                            <div style={{ marginTop: "4px" }}>
+                              {project.is_exported ? (
+                                <span className="pu-badge-exported" title="Exported record">✓ Exported</span>
+                              ) : (
+                                <span className="pu-badge-not-exported" title="Not yet exported">Non-Exported</span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Project Name / URLs */}
                           <td className="td-project-name">
                             <div>
                               <input type="text" value={project.project_name || ""}
-                                onChange={e => handleUpdate(project.project_code, "project_name", e.target.value)}
-                                className={cellInputClass(project.project_code, "project_name", project.project_name, "name-field")}
+                                onChange={e => handleUpdate(project._uid, "project_name", e.target.value)}
+                                className={cellInputClass(project, "project_name", project.project_name, "name-field")}
                                 disabled={readOnly || isCompact}
                                 title={project.project_name || "Project Name — required"}
                                 placeholder="Project Name *" />
@@ -726,8 +986,8 @@ function ProjectUpdateComponent(props) {
                             <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                               <div className="pu-url-input-wrapper">
                                 <input type="text" value={project.trello_link || ""}
-                                  onChange={e => handleUpdate(project.project_code, "trello_link", e.target.value)}
-                                  className={cellInputClass(project.project_code, "trello_link", project.trello_link, "url-field-small")}
+                                  onChange={e => handleUpdate(project._uid, "trello_link", e.target.value)}
+                                  className={cellInputClass(project, "trello_link", project.trello_link, "url-field-small")}
                                   disabled={readOnly || isCompact} placeholder="Trello URL" />
                                 {project.trello_link && project.trello_link.startsWith("http") && (
                                   <a href={project.trello_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Trello"><Link size={12} /></a>
@@ -737,8 +997,8 @@ function ProjectUpdateComponent(props) {
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.15rem" }}>
                                   <div className="pu-url-input-wrapper">
                                     <input type="text" value={project.prototype_link || ""}
-                                      onChange={e => handleUpdate(project.project_code, "prototype_link", e.target.value)}
-                                      className={cellInputClass(project.project_code, "prototype_link", project.prototype_link, "url-field-small")}
+                                      onChange={e => handleUpdate(project._uid, "prototype_link", e.target.value)}
+                                      className={cellInputClass(project, "prototype_link", project.prototype_link, "url-field-small")}
                                       disabled={readOnly} placeholder="Prototype URL" />
                                     {project.prototype_link && project.prototype_link.startsWith("http") && (
                                       <a href={project.prototype_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Prototype"><Link size={12} /></a>
@@ -746,8 +1006,8 @@ function ProjectUpdateComponent(props) {
                                   </div>
                                   <div className="pu-url-input-wrapper">
                                     <input type="text" value={project.slack_link || ""}
-                                      onChange={e => handleUpdate(project.project_code, "slack_link", e.target.value)}
-                                      className={cellInputClass(project.project_code, "slack_link", project.slack_link, "url-field-small")}
+                                      onChange={e => handleUpdate(project._uid, "slack_link", e.target.value)}
+                                      className={cellInputClass(project, "slack_link", project.slack_link, "url-field-small")}
                                       disabled={readOnly} placeholder="Slack URL" />
                                     {project.slack_link && project.slack_link.startsWith("http") && (
                                       <a href={project.slack_link} target="_blank" rel="noopener noreferrer" className="pu-input-url-btn" title="Open Slack"><Link size={12} /></a>
@@ -762,8 +1022,8 @@ function ProjectUpdateComponent(props) {
                           <td className="td-lead">
                             <div>
                               <select value={project.lead_engineer || ""}
-                                onChange={e => handleUpdate(project.project_code, "lead_engineer", e.target.value)}
-                                className={cellSelectClass(project.project_code, "lead_engineer", project.lead_engineer, "lead-select-main")}
+                                onChange={e => handleUpdate(project._uid, "lead_engineer", e.target.value)}
+                                className={cellSelectClass(project, "lead_engineer", project.lead_engineer, "lead-select-main")}
                                 disabled={readOnly || isCompact}>
                                 <option value="">Lead Engineer *</option>
                                 {leadEngineers.map(eng => <option key={eng} value={eng}>{eng}</option>)}
@@ -774,15 +1034,15 @@ function ProjectUpdateComponent(props) {
                               <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                                 <div className="pu-date-input-wrap">
                                   <input type="date" value={project.start_date || ""}
-                                    onChange={e => handleUpdate(project.project_code, "start_date", e.target.value)}
-                                    className={cellInputClass(project.project_code, "start_date", project.start_date, "date-field-small")}
+                                    onChange={e => handleUpdate(project._uid, "start_date", e.target.value)}
+                                    className={cellInputClass(project, "start_date", project.start_date, "date-field-small")}
                                     disabled={readOnly} title="Start Date *" />
                                   {projFieldErrs.start_date && <div className="pu-field-error-msg">{projFieldErrs.start_date}</div>}
                                 </div>
                                 <div className="pu-date-input-wrap">
                                   <input type="date" value={project.end_date || ""}
-                                    onChange={e => handleUpdate(project.project_code, "end_date", e.target.value)}
-                                    className={cellInputClass(project.project_code, "end_date", project.end_date, "date-field-small")}
+                                    onChange={e => handleUpdate(project._uid, "end_date", e.target.value)}
+                                    className={cellInputClass(project, "end_date", project.end_date, "date-field-small")}
                                     disabled={readOnly} title="Est. Date (End Date) *" />
                                   {projFieldErrs.end_date && <div className="pu-field-error-msg">{projFieldErrs.end_date}</div>}
                                 </div>
@@ -792,21 +1052,21 @@ function ProjectUpdateComponent(props) {
 
                           {/* Status / Priority / Notes */}
                           <td className="td-status-group">
-                            <select value={project.status || "In progress"}
-                              onChange={e => handleUpdate(project.project_code, "status", e.target.value)}
-                              className={cellSelectClass(project.project_code, "status", project.status || "In progress", "status-select-main")}
+                            <select value={project.status || "Not started"}
+                              onChange={e => handleUpdate(project._uid, "status", e.target.value)}
+                              className={cellSelectClass(project, "status", project.status || "Not started", "status-select-main")}
                               disabled={readOnly || isCompact}>
                               {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
                             <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                               <input type="text" value={project.priority || ""}
-                                onChange={e => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
-                                className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
+                                onChange={e => handleUpdate(project._uid, "priority", e.target.value.toUpperCase())}
+                                className={cellInputClass(project, "priority", project.priority, "priority-field-small")}
                                 disabled={readOnly || isCompact} placeholder="Priority" />
                               {!isCompact && (
                                 <textarea value={project.notes || ""}
-                                  onChange={e => handleUpdate(project.project_code, "notes", e.target.value || null)}
-                                  className={`pu-notes-textarea${isDirty(project.project_code, "notes") ? " dirty" : ""}${!isDirty(project.project_code, "notes") && isDbUpdated(project, "notes") ? " db-updated" : ""}`}
+                                  onChange={e => handleUpdate(project._uid, "notes", e.target.value || null)}
+                                  className={`pu-notes-textarea${isDirty(project, "notes") ? " dirty" : ""}${!isDirty(project, "notes") && isDbUpdated(project, "notes") ? " db-updated" : ""}`}
                                   style={{ marginTop: "0.2rem", minHeight: "44px" }}
                                   disabled={readOnly} placeholder="Add notes…"
                                   title={project.notes || "Add notes..."} rows={2} />
@@ -824,7 +1084,7 @@ function ProjectUpdateComponent(props) {
                                   { label: "WA", field: "checkbox_wa" },
                                   { label: "WS", field: "checkbox_ws" }
                                 ].map(item => {
-                                  const dirty = isDirty(project.project_code, item.field);
+                                  const dirty = isDirty(project, item.field);
                                   const dbUpd = !dirty && isDbUpdated(project, item.field);
                                   return (
                                     <label key={item.field} className={`pu-checkbox-label${dirty ? " dirty" : ""}${dbUpd ? " db-updated" : ""}`}>
@@ -835,7 +1095,7 @@ function ProjectUpdateComponent(props) {
                                           if (v === 1 || v === "1" || v === 1.0 || v === "1.0") return false;
                                           return false;
                                         })()}
-                                        onChange={e => handleUpdate(project.project_code, item.field, e.target.checked ? null : 1)}
+                                        onChange={e => handleUpdate(project._uid, item.field, e.target.checked ? null : 1)}
                                         disabled={readOnly} />
                                       <span>{item.label}</span>
                                     </label>
@@ -853,8 +1113,8 @@ function ProjectUpdateComponent(props) {
                                     const n = parseFloat(v);
                                     return isNaN(n) ? v : n.toString();
                                   })()}
-                                  onChange={e => handleUpdate(project.project_code, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
-                                  className={cellInputClass(project.project_code, "estimated_days", project.estimated_days, "estimate-input")}
+                                  onChange={e => handleUpdate(project._uid, "estimated_days", e.target.value ? parseFloat(e.target.value) : null)}
+                                  className={cellInputClass(project, "estimated_days", project.estimated_days, "estimate-input")}
                                   disabled={readOnly} placeholder="0" />
                                 {projFieldErrs.estimated_days && (
                                   <div className="pu-field-error-msg" style={{ fontSize: "0.6rem" }}>{projFieldErrs.estimated_days}</div>

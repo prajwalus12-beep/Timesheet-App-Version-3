@@ -97,7 +97,7 @@ def update_user_lockout(username, failed_attempts, locked_until=None):
 def get_all_users():
     """Fetch all users with their details using Supabase SDK join-like approach."""
     supabase = get_supabase_client()
-    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status'])
+    if not supabase: return pd.DataFrame(columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'allow_add_project', 'employee_id', 'email', 'status', 'emp_type'])
     
     try:
         # Try fetching with the new columns
@@ -106,10 +106,14 @@ def get_all_users():
         # Fallback if columns don't exist yet
         res = supabase.table('users').select('id, username, employee_id, password, employee:employee(employee_name, slack_id)').order('username').execute()
     
+    add_proj_perms = get_all_add_project_permissions()
     data = res.data or []
     rows = []
     for r in data:
         emp = r.get('employee') or {}
+        emp_id_str = str(r.get('employee_id') or '')
+        # Check add_project permission
+        allow_add = add_proj_perms.get(emp_id_str, bool(emp.get('allow_add_project', False)))
         rows.append([
             r['id'],
             r['username'],
@@ -117,13 +121,14 @@ def get_all_users():
             emp.get('slack_id'),
             r['password'],
             emp.get('project_update_access', False), # Defaults to False if missing
+            allow_add,
             r['employee_id'],
             emp.get('email'),
             emp.get('status', 1),
             emp.get('emp_type', 'Full-Time Employee')
         ])
     
-    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'employee_id', 'email', 'status', 'emp_type'])
+    return pd.DataFrame(rows, columns=['id', 'username', 'employee_name', 'slack_id', 'password', 'project_update_access', 'allow_add_project', 'employee_id', 'email', 'status', 'emp_type'])
 
 def get_employee_by_id(emp_id):
     """Fetch single employee details using Supabase SDK."""
@@ -747,6 +752,10 @@ def get_add_projects():
         # Ensure boolean column is consistent
         if 'fmp_added' in df.columns:
             df['fmp_added'] = df['fmp_added'].fillna(False).astype(bool)
+        if 'is_exported' in df.columns:
+            df['is_exported'] = df['is_exported'].fillna(False).astype(bool)
+        else:
+            df['is_exported'] = df['fmp_added'] if 'fmp_added' in df.columns else False
         return df
     except Exception:
         return pd.DataFrame()
@@ -877,6 +886,89 @@ def mark_fmp_added(record_ids: list, user_emp_id: str, user_name: str):
         return True, f"{len(record_ids)} project(s) marked as Added in FMP."
     except Exception as e:
         return False, str(e)
+
+
+def mark_projects_exported(record_ids: list, user_emp_id: str, user_name: str):
+    """Mark a list of add_project records as Exported.
+
+    Parameters
+    ----------
+    record_ids : list[int]   Primary keys to mark
+    user_emp_id, user_name   User who is marking them
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+
+    if not record_ids:
+        return False, "No records selected."
+
+    import datetime
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    payload = {
+        'fmp_added':       True,
+        'fmp_added_at':    now_iso,
+        'fmp_added_by_id':   str(user_emp_id or ''),
+        'fmp_added_by_name': str(user_name or ''),
+    }
+
+    try:
+        # Try updating both is_exported and fmp_added
+        payload_with_exported = {**payload, 'is_exported': True}
+        supabase.table('add_project').update(payload_with_exported).in_('id', record_ids).execute()
+        return True, f"{len(record_ids)} project(s) marked as Exported successfully."
+    except Exception:
+        try:
+            # Fallback if is_exported column does not exist in schema
+            supabase.table('add_project').update(payload).in_('id', record_ids).execute()
+            return True, f"{len(record_ids)} project(s) marked as Exported successfully."
+        except Exception as e:
+            return False, str(e)
+
+
+def mark_projects_non_exported(record_ids: list, user_emp_id: str, user_name: str):
+    """Mark a list of add_project records as Non-Exported.
+
+    Parameters
+    ----------
+    record_ids : list[int]   Primary keys to unmark
+    user_emp_id, user_name   User who is unmarking them
+
+    Returns (success: bool, message: str)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+
+    if not record_ids:
+        return False, "No records selected."
+
+    payload = {
+        'fmp_added':       False,
+        'fmp_added_at':    None,
+        'fmp_added_by_id':   None,
+        'fmp_added_by_name': None,
+        'is_exported':     False,
+    }
+
+    try:
+        supabase.table('add_project').update(payload).in_('id', record_ids).execute()
+        return True, f"{len(record_ids)} project(s) marked as Non-Exported successfully."
+    except Exception:
+        try:
+            # Fallback if is_exported column does not exist in schema
+            fallback = {
+                'fmp_added':       False,
+                'fmp_added_at':    None,
+                'fmp_added_by_id':   None,
+                'fmp_added_by_name': None,
+            }
+            supabase.table('add_project').update(fallback).in_('id', record_ids).execute()
+            return True, f"{len(record_ids)} project(s) marked as Non-Exported successfully."
+        except Exception as e:
+            return False, str(e)
 
 
 def delete_add_project(record_id: int):
@@ -1304,6 +1396,69 @@ def update_project_update_access(employee_id, has_access):
         return True, "Success"
     except Exception as e:
         return False, str(e)
+
+
+def get_all_add_project_permissions() -> dict:
+    """Fetch dictionary of {employee_id: bool} for add project permissions.
+    Checks app_settings ('add_project_permissions') with fallback/overlay from employee.allow_add_project.
+    """
+    import json
+    val = get_app_setting('add_project_permissions', '{}')
+    perms = {}
+    if val:
+        try:
+            perms = json.loads(val)
+        except Exception:
+            perms = {}
+
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            res = supabase.table('employee').select('employee_id, allow_add_project').execute()
+            for r in (res.data or []):
+                eid = str(r.get('employee_id') or '')
+                if 'allow_add_project' in r and r['allow_add_project'] is not None:
+                    perms[eid] = bool(r['allow_add_project'])
+        except Exception:
+            pass
+    return perms
+
+
+def get_employee_add_project_access(employee_id) -> bool:
+    """Check if a specific employee is allowed to add projects."""
+    if not employee_id:
+        return False
+    eid_str = str(employee_id).strip()
+    if eid_str.lower() in ("admin", "system administrator"):
+        return True
+    perms = get_all_add_project_permissions()
+    return bool(perms.get(eid_str, False))
+
+
+def update_add_project_access(employee_id, has_access: bool):
+    """Update an employee's access to the add project functionality."""
+    import json
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Configuration error"
+
+    eid_str = str(employee_id).strip()
+    
+    # 1. Update in app_settings (guaranteed to succeed without requiring DB migration)
+    try:
+        perms = get_all_add_project_permissions()
+        perms[eid_str] = bool(has_access)
+        set_app_setting('add_project_permissions', json.dumps(perms))
+    except Exception as e:
+        return False, f"Failed updating permissions store: {e}"
+
+    # 2. Also attempt updating employee table column if it exists in schema
+    try:
+        supabase.table('employee').update({'allow_add_project': bool(has_access)}).eq('employee_id', eid_str).execute()
+    except Exception:
+        pass  # Column may not exist yet; app_settings is the reliable store
+
+    return True, "Success"
 
 def init_db():
     """Initialize system admin if missing using Supabase SDK."""

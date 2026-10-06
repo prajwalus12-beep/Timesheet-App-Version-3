@@ -289,7 +289,13 @@ function ProjectUpdateComponent(props) {
 
   // ---- Export ----
   const handleExportClick = () => {
-    Streamlit.setComponentValue({ action: "open_export_modal" });
+    const displayedProjectCodes = filteredProjects.map(p => String(p.project_code));
+    Streamlit.setComponentValue({
+      action: "open_export_modal",
+      payload: {
+        displayedProjectCodes: displayedProjectCodes
+      }
+    });
   };
 
   const handleOpenReminderModal = () => {

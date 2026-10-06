@@ -47,25 +47,25 @@ def _round_actual_days(v):
 
 
 def _format_checkbox_value(v):
-    """Format checkbox value to boolean string for Excel export:
-    - Checked on UI (None / NaN / empty string / True / 0)  -> 'TRUE'
-    - Unchecked on UI (1 / '1' / 1.0 / '1.0' / False)     -> 'FALSE'
+    """Format checkbox value to boolean for Excel export:
+    - Checked on UI (None / NaN / empty string / True / 0)  -> True
+    - Unchecked on UI (1 / '1' / 1.0 / '1.0' / False)     -> False
     """
     if pd.isna(v) or v is None:
-        return 'TRUE'
+        return True
     if isinstance(v, bool):
-        return 'TRUE' if v else 'FALSE'
+        return v
     s = str(v).strip().lower()
     if s in ('1', '1.0', 'false', 'no', 'unchecked'):
-        return 'FALSE'
+        return False
     if s in ('nan', 'none', 'nat', '', '0', '0.0', 'true', 'yes', 'checked'):
-        return 'TRUE'
+        return True
     try:
         if float(s) == 1.0:
-            return 'FALSE'
+            return False
     except (ValueError, TypeError):
         pass
-    return 'TRUE'
+    return True
 
 
 def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=False):
@@ -244,7 +244,7 @@ def export_dialog(df):
     
     with col1:
         st.markdown("#### Export All")
-        st.caption(f"Export all {len(df)} projects")
+        st.caption(f"Export {len(df)} displayed project(s)")
         buffer_all = _generate_excel_buffer(df)
         st.download_button(
             "📥 Download All",
@@ -559,7 +559,14 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
                 st.rerun()
 
     elif action == "open_export_modal":
-        export_dialog(df)
+        payload = result.get("payload", {})
+        displayed_project_codes = payload.get("displayedProjectCodes")
+        if displayed_project_codes is not None:
+            displayed_str_codes = {str(c).strip() for c in displayed_project_codes if c is not None and str(c).strip()}
+            export_df = df[df['project_code'].astype(str).str.strip().isin(displayed_str_codes)].copy()
+        else:
+            export_df = df
+        export_dialog(export_df)
 
     elif action == "open_reminder_modal":
         from database.queries import is_employee_active
