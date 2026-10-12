@@ -435,14 +435,15 @@ def render_reports_page(user):
                 try:
                     pie_fname = f"pie_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
                     pie_pdf_bytes = build_pie_pdf_report(r_start, r_end, pie_df, total_project_days)
-                    _pc, _bc = st.columns([1, 5])
-                    with _pc:
+                    _pie_btn_col, _ = st.columns([2, 4])
+                    with _pie_btn_col:
                         st.download_button(
-                            label="🥧 Export Pie Chart PDF",
+                            label="🥧 Pie Chart — Export PDF",
                             data=pie_pdf_bytes,
                             file_name=pie_fname,
                             mime="application/pdf",
                             key="report_pie_pdf_btn",
+                            use_container_width=True,
                         )
                 except Exception as _pie_pdf_err:
                     st.error(f"⚠️ Pie PDF failed: {_pie_pdf_err}")
@@ -548,14 +549,15 @@ def render_reports_page(user):
                     try:
                         bar_fname = f"bar_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
                         bar_pdf_bytes = build_bar_pdf_report(r_start, r_end, bar_df)
-                        _bc1, _bc2 = st.columns([1, 5])
-                        with _bc1:
+                        _bar_btn_col, _ = st.columns([2, 4])
+                        with _bar_btn_col:
                             st.download_button(
-                                label="📊 Export Bar Chart PDF",
+                                label="📊 Bar Chart — Export PDF",
                                 data=bar_pdf_bytes,
                                 file_name=bar_fname,
                                 mime="application/pdf",
                                 key="report_bar_pdf_btn",
+                                use_container_width=True,
                             )
                     except Exception as _bar_pdf_err:
                         st.error(f"⚠️ Bar PDF failed: {_bar_pdf_err}")
