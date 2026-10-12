@@ -8,11 +8,47 @@ import textwrap
 import pandas as pd
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.graphics.shapes import Drawing, Rect, String, Line
 from reportlab.graphics.charts.piecharts import Pie
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project Status → Colour Mapping  (matches the user's visual preview)
+# ─────────────────────────────────────────────────────────────────────────────
+STATUS_COLORS = {
+    'not started':        '#94A3B8',   # slate-400
+    'awaiting info':      '#D97706',   # 
+    'at beta':            '#2DD4BF',   # teal-400
+    'in progress':        '#80BF48',   # blue-400
+    'in testing':         '#FFAE10',   # orange
+    'complete':           '#4ADE80',   # green-400
+    'to be deployed':     '#EDE9FE',   # sky-400
+    'duplicate - closed': '#94A3B8',   # slate-400
+    'ongoing':            '#64748B',   # fuchsia-400
+}
+# Human-readable labels for the legend (preserves original capitalisation)
+STATUS_LABELS = [
+    ('Not Started',        '#94A3B8'),
+    ('Awaiting Info',      '#D97706'),
+    ('At Beta',            '#2DD4BF'),
+    ('In Progress',        '#80BF48'),
+    ('In Testing',         '#FFAE10'),
+    ('Complete',           '#4ADE80'),
+    ('To Be Deployed',     '#EDE9FE'),
+    ('Ongoing',            '#64748B'),
+    ('Duplicate / Closed', '#94A3B8'),
+]
+DEFAULT_BAR_COLOR = '#94A3B8'
+
+
+def get_status_color_hex(status_str: str) -> str:
+    """Return the hex colour for a given project status string (case-insensitive)."""
+    if not status_str:
+        return DEFAULT_BAR_COLOR
+    return STATUS_COLORS.get(str(status_str).strip().lower(), DEFAULT_BAR_COLOR)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -326,14 +362,9 @@ def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days
         dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 12, b_margin_b - 28, "Days", fontSize=10, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
         
         bar_blues = [
-            colors.HexColor('#174d8c'),
-            colors.HexColor('#2979b9'),
-            colors.HexColor('#65a5d1'),
-            colors.HexColor('#8ebdde'),
-            colors.HexColor('#adcde6'),
-            colors.HexColor('#bad1e8'),
-            colors.HexColor('#d9e6f2'),
-            colors.HexColor('#e6f0fa')
+            colors.HexColor('#174d8c'), colors.HexColor('#2979b9'), colors.HexColor('#65a5d1'),
+            colors.HexColor('#8ebdde'), colors.HexColor('#adcde6'), colors.HexColor('#bad1e8'),
+            colors.HexColor('#d9e6f2'), colors.HexColor('#e6f0fa')
         ]
         
         n_bars = len(bar_df)
@@ -533,12 +564,6 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
 
         dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 12, b_margin_b - 28, "Days", fontSize=10, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
 
-        bar_blues = [
-            colors.HexColor('#174d8c'), colors.HexColor('#2979b9'), colors.HexColor('#65a5d1'),
-            colors.HexColor('#8ebdde'), colors.HexColor('#adcde6'), colors.HexColor('#bad1e8'),
-            colors.HexColor('#d9e6f2'), colors.HexColor('#e6f0fa')
-        ]
-
         n_bars = len(bar_df)
         bar_slot_h = b_plot_h / max(n_bars, 1)
         bar_height = min(22, max(12, bar_slot_h * 0.65))
@@ -556,15 +581,74 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
                 if len(lines) > 2:
                     dwg_bar.add(String(b_margin_l - 8, y_center - 16, lines[2], fontSize=7.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             bw = (row['days'] / x_max) * b_plot_w
-            color_idx = min(i, len(bar_blues) - 1)
-            fill_c = bar_blues[color_idx]
-            stroke_c = colors.HexColor('#2979b9') if color_idx >= 6 else colors.HexColor('#3a82f6')
-            dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=stroke_c, strokeWidth=0.6))
+            # Colour bar by project status
+            status_hex = get_status_color_hex(str(row.get('status', '')))
+            fill_c = colors.HexColor(status_hex)
+            dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=fill_c, strokeWidth=0.4))
             label_text = row['metadata_text']
             dwg_bar.add(String(b_margin_l + bw + 6, y_center - 3, label_text, fontSize=7.8, fontName="Helvetica", fillColor=colors.HexColor('#334155')))
     else:
         dwg_bar.add(String(pw / 2 - 80, 220, "No bar chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
 
     story.append(dwg_bar)
+
+    # ── Status colour legend (only statuses present in this data) ────────────────
+    if not bar_df.empty and 'status' in bar_df.columns:
+        present_statuses = bar_df['status'].dropna().unique()
+        legend_rows = [
+            (lbl, hex_c) for lbl, hex_c in STATUS_LABELS
+            if any(str(s).strip().lower() == lbl.lower().replace(' / ', ' - ') or
+                   str(s).strip().lower() == lbl.lower()
+                   for s in present_statuses)
+        ]
+        # Fallback: show all if nothing matched
+        if not legend_rows:
+            legend_rows = STATUS_LABELS
+
+        leg_style = ParagraphStyle(
+            'LegLabel', parent=getSampleStyleSheet()['Normal'],
+            fontSize=8, leading=10, textColor=colors.HexColor('#1e293b'),
+        )
+        leg_title_style = ParagraphStyle(
+            'LegTitle', parent=getSampleStyleSheet()['Normal'],
+            fontSize=9, leading=11, fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#1e293b'), spaceAfter=4,
+        )
+        legend_cell_size = 12
+        cells_per_row = 5
+        table_data = []
+        row_cells = [Paragraph('<b>Status Legend:</b>', leg_title_style)]
+        # pad first row
+        row_cells += [''] * (cells_per_row * 2 - 1)
+        table_data.append(row_cells)
+        current = []
+        for lbl, hex_c in legend_rows:
+            swatch = Drawing(legend_cell_size, legend_cell_size)
+            swatch.add(Rect(0, 0, legend_cell_size, legend_cell_size,
+                            fillColor=colors.HexColor(hex_c),
+                            strokeColor=colors.HexColor(hex_c), strokeWidth=0))
+            current.append(swatch)
+            current.append(Paragraph(lbl, leg_style))
+            if len(current) >= cells_per_row * 2:
+                table_data.append(current)
+                current = []
+        if current:
+            current += [''] * (cells_per_row * 2 - len(current))
+            table_data.append(current)
+
+        col_widths = [legend_cell_size + 4, 90] * cells_per_row
+        leg_table = Table(table_data, colWidths=col_widths)
+        leg_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('SPAN', (0, 0), (-1, 0)),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8fafc')),
+            ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.HexColor('#e2e8f0')),
+        ]))
+        story.append(leg_table)
+
     doc.build(story)
     return pdf_buf.getvalue()

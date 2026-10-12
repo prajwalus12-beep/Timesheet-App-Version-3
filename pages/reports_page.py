@@ -16,6 +16,8 @@ from utils.chart_helpers import (
     build_charts_pdf_report,
     build_pie_pdf_report,
     build_bar_pdf_report,
+    get_status_color_hex,
+    STATUS_LABELS,
 )
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -488,10 +490,8 @@ def render_reports_page(user):
                         customdata=bar_customdata,
                         cliponaxis=False,
                         marker=dict(
-                            color=bar_df['days'],
-                            colorscale='Blues',
-                            showscale=False,
-                            line=dict(color='rgba(58,134,255,0.5)', width=0.5)
+                            color=[get_status_color_hex(s) for s in bar_df['status']],
+                            line=dict(color='rgba(255,255,255,0.4)', width=0.5)
                         ),
                         hovertemplate=(
                             '<b>%{customdata[0]}</b><br>'
@@ -544,6 +544,35 @@ def render_reports_page(user):
                         autosize=True,
                     )
                     st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+
+                    # ── Status Colour Legend (UI) ────────────────────────────────
+                    # Only show statuses actually present in the current bar_df
+                    present_statuses_ui = set(
+                        str(s).strip().lower() for s in bar_df['status'].dropna().unique()
+                    )
+                    visible_legend = [
+                        (lbl, hex_c) for lbl, hex_c in STATUS_LABELS
+                        if lbl.lower() in present_statuses_ui
+                        or lbl.lower().replace(' / ', ' - ') in present_statuses_ui
+                    ] or list(STATUS_LABELS)  # fallback: show all
+
+                    legend_swatches = "".join(
+                        f'<span style="display:inline-flex;align-items:center;gap:5px;'
+                        f'margin:3px 10px 3px 0;white-space:nowrap;">'
+                        f'<span style="display:inline-block;width:13px;height:13px;'
+                        f'border-radius:3px;background:{hex_c};flex-shrink:0;"></span>'
+                        f'<span style="font-size:0.78rem;color:#1e293b;">{lbl}</span></span>'
+                        for lbl, hex_c in visible_legend
+                    )
+                    st.markdown(
+                        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
+                        f'padding:10px 14px;margin-top:4px;margin-bottom:8px;">'
+                        f'<div style="font-size:0.8rem;font-weight:600;color:#475569;'
+                        f'margin-bottom:6px;">Status Legend</div>'
+                        f'<div style="display:flex;flex-wrap:wrap;gap:2px;">'
+                        f'{legend_swatches}</div></div>',
+                        unsafe_allow_html=True
+                    )
 
                     # ── Bar Chart PDF Export ───────────────────────────────────
                     try:
