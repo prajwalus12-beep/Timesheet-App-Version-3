@@ -13,7 +13,9 @@ from utils.chart_helpers import (
     wrap_project_name,
     format_date_short,
     build_project_metadata_text,
-    build_charts_pdf_report
+    build_charts_pdf_report,
+    build_pie_pdf_report,
+    build_bar_pdf_report,
 )
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -336,14 +338,13 @@ def render_reports_page(user):
 
                 pie_df = pd.DataFrame(pie_rows)
 
-                pie_customdata = []
+                pie_hovertext = []
                 legend_line_count = 0
                 for _, row in pie_df.iterrows():
-                    d_str = format_days_display(row['days'])
-                    pct = row['pct']
                     p_name = str(row['project_name'])
                     meta = str(row['metadata_text'])
-                    pie_customdata.append([d_str, pct, p_name, meta])
+                    # Pre-build the full tooltip HTML string per slice
+                    pie_hovertext.append(f"<b>{p_name}</b><br>{meta}")
                     legend_line_count += max(2, 1 + str(row['legend_label']).count('<br>'))
 
                 # ── Pie Chart: Left column, Legend: Right column ───────────────
@@ -362,17 +363,13 @@ def render_reports_page(user):
                     labels=pie_df['project_name'],   # plain text — no HTML
                     values=pie_df['days'],
                     hole=0.40,
-                    customdata=pie_customdata,
+                    hovertext=pie_hovertext,
+                    hoverinfo='text',
                     textinfo='percent',
                     textposition='inside',
                     insidetextorientation='horizontal',
                     texttemplate='<b>%{percent:.1%}</b>',
                     textfont=dict(size=13, color='#1e293b'),
-                    hovertemplate=(
-                        '<b>%{customdata[2]}</b><br>'
-                        '%{customdata[3]}'
-                        '<extra></extra>'
-                    ),
                     marker=dict(
                         colors=PIE_COLORS[:num_pie_slices],
                         line=dict(color='#ffffff', width=2)
@@ -394,6 +391,13 @@ def render_reports_page(user):
                     plot_bgcolor='rgba(0,0,0,0)',
                     uniformtext=dict(mode='hide', minsize=10),
                     autosize=True,
+                    hoverlabel=dict(
+                        bgcolor='#ffffff',
+                        bordercolor='#94a3b8',
+                        font=dict(size=12, color='#1e293b', family='Inter, Arial, sans-serif'),
+                        align='left',
+                        namelength=-1,
+                    ),
                 )
 
                 # Build legend HTML items (matching PDF: bold name + metadata line)
@@ -427,7 +431,21 @@ def render_reports_page(user):
                         unsafe_allow_html=True
                     )
 
-                st.markdown("<br>", unsafe_allow_html=True)
+                # ── Pie Chart PDF Export ───────────────────────────────────────
+                try:
+                    pie_fname = f"pie_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
+                    pie_pdf_bytes = build_pie_pdf_report(r_start, r_end, pie_df, total_project_days)
+                    _pc, _bc = st.columns([1, 5])
+                    with _pc:
+                        st.download_button(
+                            label="🥧 Export Pie Chart PDF",
+                            data=pie_pdf_bytes,
+                            file_name=pie_fname,
+                            mime="application/pdf",
+                            key="report_pie_pdf_btn",
+                        )
+                except Exception as _pie_pdf_err:
+                    st.error(f"⚠️ Pie PDF failed: {_pie_pdf_err}")
 
                 # ── Bar Chart: Total Value by Project (Days) ──────────────────
                 if project_records:
@@ -464,7 +482,7 @@ def render_reports_page(user):
 
                     fig_bar = go.Figure(go.Bar(
                         x=bar_df['days'],
-                        y=bar_df['project_name'],
+                        y=bar_df['wrapped_name'],
                         orientation='h',
                         customdata=bar_customdata,
                         cliponaxis=False,
@@ -483,31 +501,13 @@ def render_reports_page(user):
                         textposition='none',
                     ))
 
-                    # Plotly annotation per bar — shows full metadata text
-                    # matching the PDF: "6.9d (13.0%) — SD, SH | Start: 31 Jul | End: 31 Jul | Complete"
+                    # Annotations are intentionally empty on the UI chart.
+                    # (Metadata text is shown in the tooltip on hover instead.)
                     bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
                     bar_annotations = []
-                    for _, brow in bar_df.iterrows():
-                        bar_annotations.append(dict(
-                            x=brow['days'],
-                            y=brow['project_name'],
-                            text=f"  {brow['metadata_text']}",
-                            showarrow=False,
-                            xanchor='left',
-                            yanchor='middle',
-                            font=dict(size=11, color='#1e293b'),
-                            xref='x',
-                            yref='y',
-                        ))
 
-                    # Estimate characters in the longest annotation to set x-axis range.
-                    # At ~6.5px per char, font-size 11 in a ~1200px wide container:
-                    # 1px ≈ (bar_max / chart_width_px) data-units.
-                    # We use a conservative 4x multiplier so text never clips.
-                    max_meta_len = max((len(str(r)) for r in bar_df['metadata_text']), default=40)
-                    # Each char ≈ 0.13 * bar_max_days of horizontal space (empirical)
-                    text_width_units = max_meta_len * 0.13 * (bar_max_days / 10)
-                    x_range_max = bar_max_days + max(bar_max_days * 2.2, text_width_units * 1.5, 1.0)
+                    # No annotation text beside bars, so x-axis only needs a small padding.
+                    x_range_max = bar_max_days * 1.15 if bar_max_days > 0 else 1.0
 
                     bar_height = max(500, len(bar_df) * 42 + 100)
                     fig_bar.update_layout(
@@ -530,8 +530,11 @@ def render_reports_page(user):
                             tickfont=dict(size=11, color='#1e293b'),
                             showgrid=False,
                             automargin=True,
+                            tickmode='array',
+                            tickvals=bar_df['wrapped_name'].tolist(),
+                            ticktext=bar_df['wrapped_name'].tolist(),
                         ),
-                        annotations=bar_annotations,
+                        annotations=[],  # no inline text on UI; use tooltip hover instead
                         margin=dict(l=20, r=20, t=55, b=50),
                         height=bar_height,
                         paper_bgcolor='rgba(0,0,0,0)',
@@ -540,31 +543,25 @@ def render_reports_page(user):
                         autosize=True,
                     )
                     st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+
+                    # ── Bar Chart PDF Export ───────────────────────────────────
+                    try:
+                        bar_fname = f"bar_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
+                        bar_pdf_bytes = build_bar_pdf_report(r_start, r_end, bar_df)
+                        _bc1, _bc2 = st.columns([1, 5])
+                        with _bc1:
+                            st.download_button(
+                                label="📊 Export Bar Chart PDF",
+                                data=bar_pdf_bytes,
+                                file_name=bar_fname,
+                                mime="application/pdf",
+                                key="report_bar_pdf_btn",
+                            )
+                    except Exception as _bar_pdf_err:
+                        st.error(f"⚠️ Bar PDF failed: {_bar_pdf_err}")
                 else:
                     st.info("No project data available for the selected filters.")
                     bar_df = pd.DataFrame()
-
-                # ── Export Charts as PDF (ReportLab server-side, zero Chrome/Kaleido) ──
-                with chart_exp_col:
-                    st.markdown('<div style="margin-top:1.6rem"></div>', unsafe_allow_html=True)
-                    try:
-                        fname = f"charts_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
-                        pdf_bytes = build_charts_pdf_report(
-                            r_start,
-                            r_end,
-                            pie_df,
-                            total_project_days,
-                            bar_df
-                        )
-                        st.download_button(
-                            label="📄 Export PDF",
-                            data=pdf_bytes,
-                            file_name=fname,
-                            mime="application/pdf",
-                            use_container_width=True,
-                        )
-                    except Exception as _pdf_err:
-                        st.error(f"⚠️ PDF generation failed: {_pdf_err}")
             else:
                 st.info("No project data available for the selected filters.")
 
@@ -581,7 +578,7 @@ def render_reports_page(user):
             # Row style for uncompleted rows
             def row_style(row):
                 if '\u274c' in str(row.get('Status', '')) or '❌' in str(row.get('Status', '')):
-                    return ['background-color: #ffe4e6; color: #991b1b'] * len(row)
+                    return ['background-color: #ffe4e6'] * len(row)
                 return [''] * len(row)
             
             styler = styler.apply(row_style, axis=1)
