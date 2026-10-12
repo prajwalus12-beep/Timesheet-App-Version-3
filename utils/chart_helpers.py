@@ -19,15 +19,15 @@ from reportlab.graphics.charts.piecharts import Pie
 # Project Status → Colour Mapping  (matches the user's visual preview)
 # ─────────────────────────────────────────────────────────────────────────────
 STATUS_COLORS = {
-    'not started':        '#94A3B8',   # slate-400
-    'awaiting info':      '#D97706',   # 
-    'at beta':            '#2DD4BF',   # teal-400
-    'in progress':        '#80BF48',   # blue-400
-    'in testing':         '#FFAE10',   # orange
-    'complete':           '#4ADE80',   # green-400
-    'to be deployed':     '#EDE9FE',   # sky-400
-    'duplicate - closed': '#94A3B8',   # slate-400
-    'ongoing':            '#64748B',   # fuchsia-400
+    'not started':        '#94A3B8',   
+    'awaiting info':      '#D97706',   
+    'at beta':            '#2DD4BF',   
+    'in progress':        '#80BF48',  
+    'in testing':         '#FFAE10',   
+    'complete':           '#DC2626',   
+    'to be deployed':     '#EDE9FE',   
+    'duplicate - closed': '#94A3B8',   
+    'ongoing':            '#64748B',   
 }
 # Human-readable labels for the legend (preserves original capitalisation)
 STATUS_LABELS = [
@@ -36,7 +36,7 @@ STATUS_LABELS = [
     ('At Beta',            '#2DD4BF'),
     ('In Progress',        '#80BF48'),
     ('In Testing',         '#FFAE10'),
-    ('Complete',           '#4ADE80'),
+    ('Complete',           '#DC2626'),
     ('To Be Deployed',     '#EDE9FE'),
     ('Ongoing',            '#64748B'),
     ('Duplicate / Closed', '#94A3B8'),
