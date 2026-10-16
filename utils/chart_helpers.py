@@ -4,11 +4,14 @@ Fully compatible with Streamlit Community Cloud (no browser / Kaleido dependency
 """
 import io
 import re
+import html
 import textwrap
+import copy
+import math
 import pandas as pd
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.graphics.shapes import Drawing, Rect, String, Line
@@ -200,35 +203,153 @@ def build_project_metadata_text(
     return f"{day_pct_str} | {joined_meta}"
 
 
+def format_pie_slice_label(
+    project_name: str,
+    days: float,
+    pct: float,
+    initials_str: str = "",
+    start_date_str: str = "",
+    end_date_str: str = "",
+    status_str: str = "",
+    wrap_width: int = 24,
+    html_mode: bool = True
+) -> str:
+    """
+    Format a multi-line label for donut/pie chart outside labels.
+    Wraps project names onto multiple short lines and breaks metadata
+    into compact lines to prevent horizontal overflow and clipping on UI and PDF.
+    """
+    p_clean = str(project_name).strip()
+    d_str = format_days_display(days)
+    p_pct_str = f"{pct:.1f}%"
+
+    if p_clean.lower() == 'other':
+        if html_mode:
+            return f"<b>Other</b><br>{d_str} ({p_pct_str})"
+        return f"Other\n{d_str} ({p_pct_str})"
+
+    lines = wrap_project_name_lines(p_clean, width=wrap_width)
+    if html_mode:
+        w_name = "<br>".join(html.escape(l) for l in lines)
+    else:
+        w_name = "\n".join(lines)
+
+    # Line 2: Value and initials
+    val_part = f"{d_str} ({p_pct_str})"
+    if initials_str and str(initials_str).strip():
+        line2 = f"{val_part} — {str(initials_str).strip()}"
+    else:
+        line2 = val_part
+
+    # Line 3: Dates and status (omit dates when both are blank to save space)
+    start_disp = str(start_date_str).strip() if start_date_str else ""
+    end_disp = str(end_date_str).strip() if end_date_str else ""
+    meta_parts = []
+    if start_disp or end_disp:
+        meta_parts.append(f"Start: {start_disp or '—'} | End: {end_disp or '—'}")
+    status_clean = str(status_str).strip() if status_str is not None else ""
+    if status_clean and status_clean.lower() not in ('nan', 'none', '_', ''):
+        meta_parts.append(status_clean)
+    line3 = " | ".join(meta_parts)
+
+    parts = [f"<b>{w_name}</b>" if html_mode else w_name, line2]
+    if line3:
+        parts.append(line3)
+
+    separator = "<br>" if html_mode else "\n"
+    return separator.join(parts)
+
+
+def build_pie_connector_shapes(pie_df: pd.DataFrame, total_pie_days: float, cx: float = 0.50, cy: float = 0.50) -> list:
+    """
+    Plotly natively draws clean, non-overlapping elbow connector lines for
+    displaced outside labels without colliding with multi-line text data.
+    Returns an empty list to eliminate rigid manual lines that strike through text.
+    """
+    return []
+
+
+def _create_pie_plotly_fig(pie_df: pd.DataFrame, total_pie_days: float):
+    """Build a standalone Plotly Donut Chart figure for pie_df."""
+    import plotly.graph_objects as go
+    PIE_COLORS = [
+        '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
+        '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd', '#ccebc5', '#ffed6f'
+    ]
+    val_col = 'days' if 'days' in pie_df.columns else ('hours' if 'hours' in pie_df.columns else pie_df.columns[1])
+    num_slices = len(pie_df)
+
+    text_list = []
+    if 'outside_label' in pie_df.columns:
+        text_list = pie_df['outside_label'].tolist()
+    else:
+        for _, row in pie_df.iterrows():
+            d = float(row[val_col])
+            pct = (d / total_pie_days * 100) if total_pie_days > 0 else 0
+            p_name = str(row.get('project_name', ''))
+            init = str(row.get('initials', ''))
+            s_str = str(row.get('start_str', ''))
+            e_str = str(row.get('end_str', ''))
+            stat = str(row.get('status', ''))
+            text_list.append(format_pie_slice_label(p_name, d, pct, init, s_str, e_str, stat, wrap_width=24, html_mode=True))
+
+    fig = go.Figure(go.Pie(
+        labels=pie_df['project_name'],
+        values=pie_df[val_col],
+        hole=0.45,
+        text=text_list,
+        textinfo='text',
+        textposition='outside',
+        textfont=dict(size=10.5, color='#1e293b', family='Arial, sans-serif'),
+        outsidetextfont=dict(size=10.5, color='#1e293b', family='Arial, sans-serif'),
+        marker=dict(
+            colors=PIE_COLORS[:num_slices],
+            line=dict(color='#ffffff', width=2)
+        ),
+        showlegend=False,
+        sort=False,
+        direction='clockwise',
+        rotation=0,
+        domain=dict(x=[0.20, 0.80], y=[0.14, 0.80]),
+    ))
+    fig.update_layout(
+        title=dict(text=''),
+        shapes=[],
+        margin=dict(l=30, r=30, t=45, b=55),
+        height=820,
+    )
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. ReportLab PDF Generation (Server-Side, Zero Chrome/Kaleido)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days: float, bar_df: pd.DataFrame) -> bytes:
+def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days: float, bar_df: pd.DataFrame, fig=None) -> bytes:
     """
     Render a professional 2-page landscape PDF using pure ReportLab vector graphics.
-    Page 1: Total Value by Project (Donut Pie Chart in Days + Metadata Legend)
+    Page 1: Total Value by Project (Donut Pie Chart in Days matching UI)
     Page 2: Total Value by Project (Horizontal Bar Chart in Days with metadata)
     """
     pdf_buf = io.BytesIO()
     doc = SimpleDocTemplate(
         pdf_buf,
         pagesize=landscape(A4),
-        leftMargin=30, rightMargin=30,
-        topMargin=25, bottomMargin=25
+        leftMargin=25, rightMargin=25,
+        topMargin=18, bottomMargin=18
     )
     
-    pw = landscape(A4)[0] - 60  # ~781.89 pt
+    pw = landscape(A4)[0] - 50
     
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         'ChartTitle',
         parent=styles['Heading1'],
-        fontSize=15,
-        leading=18,
+        fontSize=14,
+        leading=17,
         textColor=colors.HexColor('#0f172a'),
         alignment=TA_CENTER,
-        spaceAfter=3,
+        spaceAfter=2,
     )
     sub_style = ParagraphStyle(
         'ChartSub',
@@ -237,81 +358,82 @@ def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days
         leading=12,
         textColor=colors.HexColor('#64748b'),
         alignment=TA_CENTER,
-        spaceAfter=12,
+        spaceAfter=6,
     )
     
     story = []
     
     # ── Page 1: Pie Chart ─────────────────────────────────────────────────────
-    story.append(Paragraph('<b>📈 Timesheet Analytics — Total Value by Project</b>', title_style))
+    story.append(Paragraph('<b>Timesheet Analytics — Total Value by Project</b>', title_style))
     story.append(Paragraph(
         f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
         sub_style
     ))
     
-    pie_palette = [
-        colors.HexColor('#8dd3c7'), colors.HexColor('#ffffb3'), colors.HexColor('#bebada'),
-        colors.HexColor('#fb8072'), colors.HexColor('#80b1d3'), colors.HexColor('#fdb462'),
-        colors.HexColor('#b3de69'), colors.HexColor('#fccde5'), colors.HexColor('#d9d9d9'),
-        colors.HexColor('#bc80bd'), colors.HexColor('#ccebc5'), colors.HexColor('#ffed6f')
-    ]
-    
-    dwg_pie = Drawing(pw, 440)
-    
     if not pie_df.empty and total_pie_days > 0:
-        val_col = 'days' if 'days' in pie_df.columns else ('hours' if 'hours' in pie_df.columns else pie_df.columns[1])
-        p_data = [float(v) for v in pie_df[val_col].tolist()]
-        
-        pie_chart = Pie()
-        pie_chart.x = 20
-        pie_chart.y = 40
-        pie_chart.width = 330
-        pie_chart.height = 330
-        pie_chart.data = p_data
-        pie_chart.innerRadiusFraction = 0.40
-        pie_chart.sideLabels = 0
-        pie_chart.simpleLabels = 0
-        
-        pie_chart.labels = [
-            f"{(val / total_pie_days * 100):.1f}%" if (total_pie_days > 0 and (val / total_pie_days * 100) >= 3.5) else ""
-            for val in p_data
-        ]
-        
-        for idx in range(len(p_data)):
-            pie_chart.slices[idx].fillColor = pie_palette[idx % len(pie_palette)]
-            pie_chart.slices[idx].strokeColor = colors.white
-            pie_chart.slices[idx].strokeWidth = 1.5
-            pie_chart.slices[idx].labelRadius = 0.70
-            
-        dwg_pie.add(pie_chart)
-        
-        # Legend on right side — extra vertical space for wrapped names + metadata
-        leg_x = 365
-        leg_y_start = 370
-        n_pie = len(pie_df)
-        leg_step = 36 if n_pie <= 8 else (32 if n_pie <= 11 else 28)
-        
-        for idx, (_, row) in enumerate(pie_df.iterrows()):
-            raw_name = str(row.get('display_name', row['project_name']))
-            name_lines = wrap_project_name_lines(raw_name, width=48)
-            legend_meta = str(row.get('metadata_text', ''))
-            if not legend_meta:
-                d = float(row[val_col])
-                pct = (d / total_pie_days * 100) if total_pie_days > 0 else 0
-                legend_meta = f"{format_days_display(d)} ({pct:.1f}%)"
+        img_bytes = None
+        try:
+            if fig is not None:
+                export_fig = copy.deepcopy(fig)
+            else:
+                export_fig = _create_pie_plotly_fig(pie_df, total_pie_days)
 
-            y_pos = leg_y_start - idx * leg_step
+            export_fig.update_layout(
+                title=dict(text=''),
+                shapes=[],
+                margin=dict(l=30, r=30, t=25, b=40),
+                height=700,
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+            )
+            export_fig.update_traces(
+                domain=dict(x=[0.20, 0.80], y=[0.14, 0.80])
+            )
+            img_bytes = export_fig.to_image(format='png', scale=2, width=1100, height=700)
+        except Exception:
+            img_bytes = None
 
-            dwg_pie.add(Rect(leg_x, y_pos, 11, 11, fillColor=pie_palette[idx % len(pie_palette)], strokeColor=colors.HexColor('#94a3b8'), strokeWidth=0.5))
-            first_line = name_lines[0] if name_lines else raw_name
-            dwg_pie.add(String(leg_x + 18, y_pos + 4, first_line, fontSize=7.5, fontName="Helvetica-Bold", fillColor=colors.HexColor('#1e293b')))
-            second = name_lines[1] if len(name_lines) > 1 else ""
-            extra = f"{second}  {legend_meta}".strip() if second else legend_meta
-            dwg_pie.add(String(leg_x + 18, y_pos - 7, extra[:110], fontSize=6.8, fontName="Helvetica", fillColor=colors.HexColor('#475569')))
+        if img_bytes:
+            story.append(RLImage(io.BytesIO(img_bytes), width=pw, height=480))
+        else:
+            val_col = 'days' if 'days' in pie_df.columns else ('hours' if 'hours' in pie_df.columns else pie_df.columns[1])
+            p_data = [float(v) for v in pie_df[val_col].tolist()]
+            dwg_pie = Drawing(pw, 460)
+            pie_chart = Pie()
+            pie_chart.x = int(pw / 2) - 150
+            pie_chart.y = 60
+            pie_chart.width = 300
+            pie_chart.height = 300
+            pie_chart.data = p_data
+            pie_chart.innerRadiusFraction = 0.42
+            pie_chart.sideLabels = 1
+            pie_chart.sideLabelsOffset = 0.18
+            pie_chart.simpleLabels = 0
+            pie_chart.labels = [
+                format_pie_slice_label(
+                    row.get('project_name', ''), float(row[val_col]),
+                    (float(row[val_col]) / total_pie_days * 100) if total_pie_days > 0 else 0,
+                    row.get('initials', ''), row.get('start_str', ''), row.get('end_str', ''),
+                    row.get('status', ''), wrap_width=20, html_mode=False
+                )
+                for _, row in pie_df.iterrows()
+            ]
+            pie_palette = [
+                colors.HexColor('#8dd3c7'), colors.HexColor('#ffffb3'), colors.HexColor('#bebada'),
+                colors.HexColor('#fb8072'), colors.HexColor('#80b1d3'), colors.HexColor('#fdb462'),
+                colors.HexColor('#b3de69'), colors.HexColor('#fccde5'), colors.HexColor('#d9d9d9'),
+                colors.HexColor('#bc80bd'), colors.HexColor('#ccebc5'), colors.HexColor('#ffed6f')
+            ]
+            for idx in range(len(p_data)):
+                pie_chart.slices[idx].fillColor = pie_palette[idx % len(pie_palette)]
+                pie_chart.slices[idx].strokeColor = colors.white
+                pie_chart.slices[idx].strokeWidth = 1.5
+                pie_chart.slices[idx].labelRadius = 1.35
+                pie_chart.slices[idx].fontSize = 8.5
+            dwg_pie.add(pie_chart)
+            story.append(dwg_pie)
     else:
-        dwg_pie.add(String(pw / 2 - 80, 220, "No pie chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
-        
-    story.append(dwg_pie)
+        story.append(Paragraph('<br><br>No pie chart data available.', sub_style))
     
     # ── Page 2: Bar Chart ─────────────────────────────────────────────────────
     story.append(PageBreak())
@@ -403,97 +525,108 @@ def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days
     return pdf_buf.getvalue()
 
 
-def build_pie_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days: float) -> bytes:
+def build_pie_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days: float, fig=None) -> bytes:
     """
-    Render a 1-page landscape PDF containing only the Pie Chart + legend.
-    Identical rendering to Page 1 of build_charts_pdf_report — no changes to output.
+    Render a 1-page landscape PDF containing only the Pie Chart.
+    Exports the exact Plotly donut chart as shown on the UI in high-resolution,
+    with a graceful ReportLab vector fallback if image generation is unavailable.
     """
     pdf_buf = io.BytesIO()
     doc = SimpleDocTemplate(
         pdf_buf,
         pagesize=landscape(A4),
-        leftMargin=30, rightMargin=30,
-        topMargin=25, bottomMargin=25
+        leftMargin=25, rightMargin=25,
+        topMargin=18, bottomMargin=18
     )
-    pw = landscape(A4)[0] - 60
+    pw = landscape(A4)[0] - 50
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         'ChartTitle', parent=styles['Heading1'],
-        fontSize=15, leading=18,
+        fontSize=14, leading=17,
         textColor=colors.HexColor('#0f172a'),
-        alignment=TA_CENTER, spaceAfter=3,
+        alignment=TA_CENTER, spaceAfter=2,
     )
     sub_style = ParagraphStyle(
         'ChartSub', parent=styles['Normal'],
         fontSize=9, leading=12,
         textColor=colors.HexColor('#64748b'),
-        alignment=TA_CENTER, spaceAfter=12,
+        alignment=TA_CENTER, spaceAfter=6,
     )
 
     story = []
-    story.append(Paragraph('<b>📈 Timesheet Analytics — Total Value by Project</b>', title_style))
+    story.append(Paragraph('<b>Timesheet Analytics — Total Value by Project</b>', title_style))
     story.append(Paragraph(
         f'Period: <b>{r_start.strftime("%d-%m-%Y")}</b> to <b>{r_end.strftime("%d-%m-%Y")}</b>',
         sub_style
     ))
 
-    pie_palette = [
-        colors.HexColor('#8dd3c7'), colors.HexColor('#ffffb3'), colors.HexColor('#bebada'),
-        colors.HexColor('#fb8072'), colors.HexColor('#80b1d3'), colors.HexColor('#fdb462'),
-        colors.HexColor('#b3de69'), colors.HexColor('#fccde5'), colors.HexColor('#d9d9d9'),
-        colors.HexColor('#bc80bd'), colors.HexColor('#ccebc5'), colors.HexColor('#ffed6f')
-    ]
-
-    dwg_pie = Drawing(pw, 440)
-
     if not pie_df.empty and total_pie_days > 0:
-        val_col = 'days' if 'days' in pie_df.columns else ('hours' if 'hours' in pie_df.columns else pie_df.columns[1])
-        p_data = [float(v) for v in pie_df[val_col].tolist()]
+        img_bytes = None
+        try:
+            if fig is not None:
+                export_fig = copy.deepcopy(fig)
+            else:
+                export_fig = _create_pie_plotly_fig(pie_df, total_pie_days)
 
-        pie_chart = Pie()
-        pie_chart.x = 20
-        pie_chart.y = 40
-        pie_chart.width = 330
-        pie_chart.height = 330
-        pie_chart.data = p_data
-        pie_chart.innerRadiusFraction = 0.40
-        pie_chart.sideLabels = 0
-        pie_chart.simpleLabels = 0
-        pie_chart.labels = [
-            f"{(val / total_pie_days * 100):.1f}%" if (total_pie_days > 0 and (val / total_pie_days * 100) >= 3.5) else ""
-            for val in p_data
-        ]
-        for idx in range(len(p_data)):
-            pie_chart.slices[idx].fillColor = pie_palette[idx % len(pie_palette)]
-            pie_chart.slices[idx].strokeColor = colors.white
-            pie_chart.slices[idx].strokeWidth = 1.5
-            pie_chart.slices[idx].labelRadius = 0.70
-        dwg_pie.add(pie_chart)
+            export_fig.update_layout(
+                title=dict(text=''),
+                shapes=[],
+                margin=dict(l=30, r=30, t=25, b=40),
+                height=700,
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+            )
+            export_fig.update_traces(
+                domain=dict(x=[0.20, 0.80], y=[0.14, 0.80])
+            )
+            img_bytes = export_fig.to_image(format='png', scale=2, width=1100, height=700)
+        except Exception:
+            img_bytes = None
 
-        leg_x = 365
-        leg_y_start = 370
-        n_pie = len(pie_df)
-        leg_step = 36 if n_pie <= 8 else (32 if n_pie <= 11 else 28)
-        for idx, (_, row) in enumerate(pie_df.iterrows()):
-            raw_name = str(row.get('display_name', row['project_name']))
-            name_lines = wrap_project_name_lines(raw_name, width=48)
-            legend_meta = str(row.get('metadata_text', ''))
-            if not legend_meta:
-                d = float(row[val_col])
-                pct = (d / total_pie_days * 100) if total_pie_days > 0 else 0
-                legend_meta = f"{format_days_display(d)} ({pct:.1f}%)"
-            y_pos = leg_y_start - idx * leg_step
-            dwg_pie.add(Rect(leg_x, y_pos, 11, 11, fillColor=pie_palette[idx % len(pie_palette)], strokeColor=colors.HexColor('#94a3b8'), strokeWidth=0.5))
-            first_line = name_lines[0] if name_lines else raw_name
-            dwg_pie.add(String(leg_x + 18, y_pos + 4, first_line, fontSize=7.5, fontName="Helvetica-Bold", fillColor=colors.HexColor('#1e293b')))
-            second = name_lines[1] if len(name_lines) > 1 else ""
-            extra = f"{second}  {legend_meta}".strip() if second else legend_meta
-            dwg_pie.add(String(leg_x + 18, y_pos - 7, extra[:110], fontSize=6.8, fontName="Helvetica", fillColor=colors.HexColor('#475569')))
+        if img_bytes:
+            story.append(RLImage(io.BytesIO(img_bytes), width=pw, height=480))
+        else:
+            # Fallback to vector Drawing if image export fails
+            val_col = 'days' if 'days' in pie_df.columns else ('hours' if 'hours' in pie_df.columns else pie_df.columns[1])
+            p_data = [float(v) for v in pie_df[val_col].tolist()]
+            dwg_pie = Drawing(pw, 460)
+            pie_chart = Pie()
+            pie_chart.x = int(pw / 2) - 150
+            pie_chart.y = 60
+            pie_chart.width = 300
+            pie_chart.height = 300
+            pie_chart.data = p_data
+            pie_chart.innerRadiusFraction = 0.42
+            pie_chart.sideLabels = 1
+            pie_chart.sideLabelsOffset = 0.18
+            pie_chart.simpleLabels = 0
+            pie_chart.labels = [
+                format_pie_slice_label(
+                    row.get('project_name', ''), float(row[val_col]),
+                    (float(row[val_col]) / total_pie_days * 100) if total_pie_days > 0 else 0,
+                    row.get('initials', ''), row.get('start_str', ''), row.get('end_str', ''),
+                    row.get('status', ''), wrap_width=20, html_mode=False
+                )
+                for _, row in pie_df.iterrows()
+            ]
+            pie_palette = [
+                colors.HexColor('#8dd3c7'), colors.HexColor('#ffffb3'), colors.HexColor('#bebada'),
+                colors.HexColor('#fb8072'), colors.HexColor('#80b1d3'), colors.HexColor('#fdb462'),
+                colors.HexColor('#b3de69'), colors.HexColor('#fccde5'), colors.HexColor('#d9d9d9'),
+                colors.HexColor('#bc80bd'), colors.HexColor('#ccebc5'), colors.HexColor('#ffed6f')
+            ]
+            for idx in range(len(p_data)):
+                pie_chart.slices[idx].fillColor = pie_palette[idx % len(pie_palette)]
+                pie_chart.slices[idx].strokeColor = colors.white
+                pie_chart.slices[idx].strokeWidth = 1.5
+                pie_chart.slices[idx].labelRadius = 1.35
+                pie_chart.slices[idx].fontSize = 8.5
+            dwg_pie.add(pie_chart)
+            story.append(dwg_pie)
     else:
-        dwg_pie.add(String(pw / 2 - 80, 220, "No pie chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
+        story.append(Paragraph('<br><br>No pie chart data available.', sub_style))
 
-    story.append(dwg_pie)
     doc.build(story)
     return pdf_buf.getvalue()
 

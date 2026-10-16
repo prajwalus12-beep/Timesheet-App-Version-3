@@ -11,6 +11,8 @@ from utils.chart_helpers import (
     format_days_display,
     format_project_employee_initials,
     wrap_project_name,
+    format_pie_slice_label,
+    build_pie_connector_shapes,
     format_date_short,
     build_project_metadata_text,
     build_charts_pdf_report,
@@ -302,96 +304,119 @@ def render_reports_page(user):
                 total_project_days = sum(p['days'] for p in sorted_proj_records)
 
                 # ── Pie Chart: Distribution by Project (Days) ──────────────────
-                def _pie_legend_label(project_name, meta_txt, wrap_width=42):
-                    wrapped = wrap_project_name(project_name, width=wrap_width, html=True)
-                    return f"{wrapped}<br>{meta_txt}"
+                MAX_PIE_SLICES = 7
+                MIN_PCT_THRESHOLD = 3.0
 
                 pie_rows = []
-                pie_source = sorted_proj_records
                 other_days = 0.0
-                if len(sorted_proj_records) > 10:
-                    pie_source = sorted_proj_records[:10]
-                    other_days = sum(p['days'] for p in sorted_proj_records[10:])
+
+                if len(sorted_proj_records) > 5:
+                    pie_source = []
+                    for idx, p in enumerate(sorted_proj_records):
+                        pct = (p['days'] / total_project_days * 100) if total_project_days > 0 else 0
+                        # Keep top 4 unconditionally; keep up to MAX_PIE_SLICES if >= MIN_PCT_THRESHOLD (3%)
+                        if idx < MAX_PIE_SLICES and (idx < 4 or pct >= MIN_PCT_THRESHOLD):
+                            pie_source.append(p)
+                        else:
+                            other_days += p['days']
+                else:
+                    pie_source = sorted_proj_records
+                    other_days = 0.0
 
                 for p in pie_source:
                     pct = (p['days'] / total_project_days * 100) if total_project_days > 0 else 0
                     meta_txt = build_project_metadata_text(
                         p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                     )
+                    outside_lbl = format_pie_slice_label(
+                        p['project_name'], p['days'], pct, p['initials'],
+                        p['start_str'], p['end_str'], p['status'],
+                        wrap_width=24, html_mode=True
+                    )
                     pie_rows.append({
                         'project_name': p['project_name'],
                         'display_name': p['project_name'],
                         'days': p['days'],
                         'pct': pct,
+                        'initials': p['initials'],
+                        'start_str': p['start_str'],
+                        'end_str': p['end_str'],
+                        'status': p['status'],
                         'metadata_text': meta_txt,
-                        'legend_label': _pie_legend_label(p['project_name'], meta_txt),
+                        'outside_label': outside_lbl,
                     })
                 if other_days > 0:
                     other_pct = (other_days / total_project_days * 100) if total_project_days > 0 else 0
                     other_meta = f"{format_days_display(other_days)} ({other_pct:.1f}%)"
+                    other_outside_lbl = format_pie_slice_label(
+                        'Other', other_days, other_pct,
+                        wrap_width=24, html_mode=True
+                    )
                     pie_rows.append({
                         'project_name': 'Other',
                         'display_name': 'Other',
                         'days': other_days,
                         'pct': other_pct,
+                        'initials': '',
+                        'start_str': '',
+                        'end_str': '',
+                        'status': '',
                         'metadata_text': other_meta,
-                        'legend_label': _pie_legend_label('Other', other_meta),
+                        'outside_label': other_outside_lbl,
                     })
 
                 pie_df = pd.DataFrame(pie_rows)
 
-                pie_hovertext = []
-                legend_line_count = 0
-                for _, row in pie_df.iterrows():
-                    p_name = str(row['project_name'])
-                    meta = str(row['metadata_text'])
-                    # Pre-build the full tooltip HTML string per slice
-                    pie_hovertext.append(f"<b>{p_name}</b><br>{meta}")
-                    legend_line_count += max(2, 1 + str(row['legend_label']).count('<br>'))
-
-                # ── Pie Chart: Left column, Legend: Right column ───────────────
-                # This matches the PDF layout exactly: donut on the left,
-                # rich text legend panel on the right.
                 num_pie_slices = len(pie_df)
 
-                # Pastel palette matching the PDF
+                # Pastel palette — matches the PDF and the user's reference screenshot
                 PIE_COLORS = [
-                    '#8dd3c7','#ffffb3','#bebada','#fb8072','#80b1d3',
-                    '#fdb462','#b3de69','#fccde5','#d9d9d9','#bc80bd','#ccebc5'
+                    '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
+                    '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd', '#ccebc5', '#ffed6f'
                 ]
 
-                # Build the pie figure (occupies the left column)
+                # Build per-slice customdata: [days_str, pct_str, full_metadata_for_hover]
+                pie_customdata = []
+                for _, row in pie_df.iterrows():
+                    d_str = format_days_display(row['days'])
+                    pct_str = f"{row['pct']:.1f}"
+                    meta = str(row['metadata_text'])
+                    pie_customdata.append([d_str, pct_str, meta])
+
+                # Build the pie figure — outside wrapped labels with clean native leader lines
                 fig_pie = go.Figure(go.Pie(
-                    labels=pie_df['project_name'],   # plain text — no HTML
+                    labels=pie_df['project_name'],
                     values=pie_df['days'],
-                    hole=0.40,
-                    hovertext=pie_hovertext,
-                    hoverinfo='text',
-                    textinfo='percent',
-                    textposition='inside',
-                    insidetextorientation='horizontal',
-                    texttemplate='<b>%{percent:.1%}</b>',
-                    textfont=dict(size=13, color='#1e293b'),
+                    hole=0.45,
+                    customdata=pie_customdata,
+                    text=pie_df['outside_label'],
+                    textinfo='text',
+                    textposition='outside',
+                    textfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                    outsidetextfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                    hovertemplate=(
+                        '<b>%{label}</b><br>'
+                        '%{customdata[2]}'
+                        '<extra></extra>'
+                    ),
                     marker=dict(
                         colors=PIE_COLORS[:num_pie_slices],
                         line=dict(color='#ffffff', width=2)
                     ),
                     showlegend=False,
-                    sort=False,   # Other stays last
+                    sort=False,
+                    direction='clockwise',
+                    rotation=0,
+                    domain=dict(x=[0.20, 0.80], y=[0.14, 0.80]),
                 ))
 
                 fig_pie.update_layout(
-                    title=dict(
-                        text='<b>Total Value by Project</b>',
-                        font=dict(size=17, color='#1e293b'),
-                        x=0,
-                        xanchor='left',
-                    ),
-                    margin=dict(l=10, r=10, t=50, b=10),
-                    height=460,
+                    title=dict(text=''),
+                    shapes=[],
+                    margin=dict(l=30, r=30, t=45, b=55),
+                    height=820,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
-                    uniformtext=dict(mode='hide', minsize=10),
                     autosize=True,
                     hoverlabel=dict(
                         bgcolor='#ffffff',
@@ -402,41 +427,20 @@ def render_reports_page(user):
                     ),
                 )
 
-                # Build legend HTML items (matching PDF: bold name + metadata line)
-                legend_items_html = []
-                for i, row in pie_df.iterrows():
-                    color = PIE_COLORS[i % len(PIE_COLORS)]
-                    proj_name = str(row['project_name'])
-                    meta = str(row['metadata_text'])
-                    legend_items_html.append(
-                        f'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">'
-                        f'<div style="width:13px;height:13px;min-width:13px;background:{color};'
-                        f'border:1px solid #bbb;border-radius:2px;margin-top:3px;"></div>'
-                        f'<div>'
-                        f'<div style="font-weight:700;font-size:0.8rem;color:#1e293b;'
-                        f'line-height:1.3;word-break:break-word;">{proj_name}</div>'
-                        f'<div style="font-size:0.72rem;color:#475569;line-height:1.4;'
-                        f'word-break:break-word;">{meta}</div>'
-                        f'</div></div>'
-                    )
+                # Dedicated HTML header above chart canvas avoids label-title overlap completely
+                st.markdown(
+                    "<h4 style='text-align: center; color: #1e293b; font-weight: 600; "
+                    "font-size: 1.25rem; margin-top: 6px; margin-bottom: 2px;'>Total Value by Project</h4>",
+                    unsafe_allow_html=True
+                )
 
-                # Side-by-side: pie left (55%), legend right (45%)
-                pie_col, legend_col = st.columns([55, 45])
-                with pie_col:
-                    st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart")
-                with legend_col:
-                    st.markdown(
-                        '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;'
-                        'padding:14px 16px;margin-top:4px;max-height:480px;overflow-y:auto;">'
-                        + "".join(legend_items_html)
-                        + '</div>',
-                        unsafe_allow_html=True
-                    )
+                # Full-width responsive chart — wrapped outside labels prevent clipping
+                st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart", config={"responsive": True})
 
                 # ── Pie Chart PDF Export ───────────────────────────────────────
                 try:
                     pie_fname = f"pie_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
-                    pie_pdf_bytes = build_pie_pdf_report(r_start, r_end, pie_df, total_project_days)
+                    pie_pdf_bytes = build_pie_pdf_report(r_start, r_end, pie_df, total_project_days, fig=fig_pie)
                     _pie_btn_col, _ = st.columns([2, 4])
                     with _pie_btn_col:
                         st.download_button(
@@ -449,6 +453,7 @@ def render_reports_page(user):
                         )
                 except Exception as _pie_pdf_err:
                     st.error(f"⚠️ Pie PDF failed: {_pie_pdf_err}")
+
 
                 # ── Bar Chart: Total Value by Project (Days) ──────────────────
                 if project_records:
