@@ -9,7 +9,7 @@ import textwrap
 import copy
 import math
 import pandas as pd
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4, A3, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -633,30 +633,31 @@ def build_pie_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days: f
 
 def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
     """
-    Render a 1-page landscape PDF containing only the Bar Chart.
-    Identical rendering to Page 2 of build_charts_pdf_report — no changes to output.
+    Render a 1-page landscape A3 PDF containing the Bar Chart (Top 20 Projects)
+    with ample horizontal space, clear readable text directly to the right of bars,
+    and a clean status color legend underneath.
     """
     pdf_buf = io.BytesIO()
     doc = SimpleDocTemplate(
         pdf_buf,
-        pagesize=landscape(A4),
-        leftMargin=30, rightMargin=30,
+        pagesize=landscape(A3),
+        leftMargin=35, rightMargin=35,
         topMargin=25, bottomMargin=25
     )
-    pw = landscape(A4)[0] - 60
+    pw = landscape(A3)[0] - 70
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         'ChartTitle', parent=styles['Heading1'],
-        fontSize=15, leading=18,
+        fontSize=18, leading=22,
         textColor=colors.HexColor('#0f172a'),
-        alignment=TA_CENTER, spaceAfter=3,
+        alignment=TA_CENTER, spaceAfter=4,
     )
     sub_style = ParagraphStyle(
         'ChartSub', parent=styles['Normal'],
-        fontSize=9, leading=12,
+        fontSize=11, leading=14,
         textColor=colors.HexColor('#64748b'),
-        alignment=TA_CENTER, spaceAfter=12,
+        alignment=TA_CENTER, spaceAfter=14,
     )
 
     story = []
@@ -666,23 +667,23 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
         sub_style
     ))
 
-    dwg_bar = Drawing(pw, 440)
+    dwg_bar = Drawing(pw, 580)
 
     if not bar_df.empty:
-        b_margin_l = 210
-        b_margin_r = 25
-        b_margin_b = 40
+        b_margin_l = 260
+        b_margin_r = 35
+        b_margin_b = 45
         b_margin_t = 15
         b_plot_w = pw - b_margin_l - b_margin_r
-        b_plot_h = 440 - b_margin_t - b_margin_b
+        b_plot_h = 580 - b_margin_t - b_margin_b
 
         max_days = bar_df['days'].max() if not bar_df.empty else 1.0
-        x_max = max(max_days * 2.2, 1.0)
+        x_max = max(max_days * 2.3, max_days + 8.0) if max_days > 0 else 10.0
 
         if x_max <= 5:      tick_step = 1
-        elif x_max <= 12:   tick_step = 2
-        elif x_max <= 30:   tick_step = 5
-        elif x_max <= 70:   tick_step = 10
+        elif x_max <= 15:   tick_step = 2
+        elif x_max <= 35:   tick_step = 5
+        elif x_max <= 80:   tick_step = 10
         else:               tick_step = 20
 
         ticks = [i * tick_step for i in range(int(x_max // tick_step) + 1)]
@@ -693,33 +694,43 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
         for t in ticks:
             x_pos = b_margin_l + (t / x_max) * b_plot_w
             dwg_bar.add(Line(x_pos, b_margin_b, x_pos, b_margin_b + b_plot_h, strokeColor=colors.HexColor('#f1f5f9'), strokeWidth=0.8))
-            dwg_bar.add(String(x_pos - 3, b_margin_b - 14, str(t), fontSize=8.5, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
+            dwg_bar.add(String(x_pos - 4, b_margin_b - 14, str(t), fontSize=9, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
 
-        dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 12, b_margin_b - 28, "Days", fontSize=10, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
+        dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 15, b_margin_b - 30, "Days", fontSize=11, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
 
         n_bars = len(bar_df)
         bar_slot_h = b_plot_h / max(n_bars, 1)
-        bar_height = min(22, max(12, bar_slot_h * 0.65))
+        bar_height = min(24, max(14, bar_slot_h * 0.70))
 
         for i, (_, row) in enumerate(bar_df.iterrows()):
             y_center = b_margin_b + b_plot_h - (i + 0.5) * bar_slot_h
             y_bar = y_center - bar_height / 2
             p_name = str(row['project_name'])
-            lines = wrap_project_name_lines(p_name, width=36)
+            lines = wrap_project_name_lines(p_name, width=42)
             if len(lines) <= 1:
-                dwg_bar.add(String(b_margin_l - 8, y_center - 3, lines[0] if lines else "", fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center - 3.5, lines[0] if lines else "", fontSize=9.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             else:
-                dwg_bar.add(String(b_margin_l - 8, y_center + 4, lines[0], fontSize=8, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
-                dwg_bar.add(String(b_margin_l - 8, y_center - 7, lines[1], fontSize=8, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center + 4, lines[0], fontSize=9.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center - 7, lines[1], fontSize=9.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
                 if len(lines) > 2:
-                    dwg_bar.add(String(b_margin_l - 8, y_center - 16, lines[2], fontSize=7.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                    dwg_bar.add(String(b_margin_l - 10, y_center - 17, lines[2], fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             bw = (row['days'] / x_max) * b_plot_w
             # Colour bar by project status
             status_hex = get_status_color_hex(str(row.get('status', '')))
             fill_c = colors.HexColor(status_hex)
             dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=fill_c, strokeWidth=0.4))
-            label_text = row['metadata_text']
-            dwg_bar.add(String(b_margin_l + bw + 6, y_center - 3, label_text, fontSize=7.8, fontName="Helvetica", fillColor=colors.HexColor('#334155')))
+            label_text = str(row.get('metadata_text', ''))
+            # Proportional overlap for PDF: wide bars allow label to overlap tip, small bars stay outside
+            pdf_min_bar_pt = 70      # Threshold: bars < 70pt stay 100% outside
+            pdf_max_overlap_pt = 20  # Cap: max 20pt overlap into bar tip
+            if bw >= pdf_min_bar_pt:
+                raw_overlap = 6 + (bw - pdf_min_bar_pt) * 0.07
+                pdf_overlap = min(pdf_max_overlap_pt, bw * 0.18, raw_overlap)
+                text_x = b_margin_l + bw - pdf_overlap
+            else:
+                text_x = b_margin_l + bw + 7
+
+            dwg_bar.add(String(text_x, y_center - 3.5, label_text, fontSize=9.0, fontName="Helvetica", fillColor=colors.HexColor('#1e293b')))
     else:
         dwg_bar.add(String(pw / 2 - 80, 220, "No bar chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
 
@@ -740,14 +751,14 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
 
         leg_style = ParagraphStyle(
             'LegLabel', parent=getSampleStyleSheet()['Normal'],
-            fontSize=8, leading=10, textColor=colors.HexColor('#1e293b'),
+            fontSize=9.5, leading=12, textColor=colors.HexColor('#1e293b'),
         )
         leg_title_style = ParagraphStyle(
             'LegTitle', parent=getSampleStyleSheet()['Normal'],
-            fontSize=9, leading=11, fontName='Helvetica-Bold',
+            fontSize=10.5, leading=13, fontName='Helvetica-Bold',
             textColor=colors.HexColor('#1e293b'), spaceAfter=4,
         )
-        legend_cell_size = 12
+        legend_cell_size = 14
         cells_per_row = 5
         table_data = []
         row_cells = [Paragraph('<b>Status Legend:</b>', leg_title_style)]
@@ -769,14 +780,14 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
             current += [''] * (cells_per_row * 2 - len(current))
             table_data.append(current)
 
-        col_widths = [legend_cell_size + 4, 90] * cells_per_row
+        col_widths = [legend_cell_size + 6, 120] * cells_per_row
         leg_table = Table(table_data, colWidths=col_widths)
         leg_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 2),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('SPAN', (0, 0), (-1, 0)),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8fafc')),
             ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.HexColor('#e2e8f0')),

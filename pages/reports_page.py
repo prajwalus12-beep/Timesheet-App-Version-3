@@ -465,7 +465,7 @@ def render_reports_page(user):
                         meta_txt = build_project_metadata_text(
                             p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                         )
-                        wrapped = wrap_project_name(p['project_name'], width=38, html=True)
+                        wrapped = wrap_project_name(p['project_name'], width=30, html=True)
                         bar_rows.append({
                             'project_name': p['project_name'],
                             'project_code': p['project_code'],
@@ -507,19 +507,76 @@ def render_reports_page(user):
                         textposition='none',
                     ))
 
-                    # Annotations are intentionally empty on the UI chart.
-                    # (Metadata text is shown in the tooltip on hover instead.)
                     bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
+
+                    # ── Proportional Label Overlap Configuration ──────────────────────────
+                    # These parameters control the overlap threshold and can be adjusted later:
+                    # - OVERLAP_MIN_BAR_PX: Minimum bar rendered width (in px) required before any overlap is allowed.
+                    #   Bars smaller than this are kept 100% outside with a clean margin (prevents collisions on small bars).
+                    # - OVERLAP_MAX_PX: Maximum pixel overlap into the bar tip for the longest bars.
+                    # - OVERLAP_RATIO: Scaling rate for overlap as bar pixel width increases beyond the threshold.
+                    # - OUTSIDE_MARGIN_PX: Spacing in pixels when the label is placed completely outside the bar.
+                    OVERLAP_MIN_BAR_PX = 80       # Threshold: bars < 80px rendered width stay 100% outside
+                    OVERLAP_MAX_PX = 22           # Cap: maximum 22px overlap into the bar tip
+                    OVERLAP_RATIO = 0.08          # Scaling rate: 0.08px overlap per extra bar pixel
+                    EST_PLOT_WIDTH_PX = 780       # Baseline horizontal plot area width in pixels
+                    OUTSIDE_MARGIN_PX = 7         # Clean 7px spacing for small bars
+
+                    # Robust x-axis upper range ensures labels have ample horizontal space across both weekly and quarterly ranges
+                    x_range_max = max(bar_max_days * 2.3, bar_max_days + 8.0) if bar_max_days > 0 else 10.0
+
                     bar_annotations = []
+                    for _, row in bar_df.iterrows():
+                        # Build a compact label: bold prefix + plain metadata
+                        d_str = format_days_display(row['days'])
+                        pct_str = f"{row['pct']:.1f}%"
+                        prefix = f"<b>{d_str} ({pct_str})</b>"
+                        # Build the rest: initials | Start ... | End ... | Status
+                        parts = []
+                        if str(row.get('initials', '')).strip():
+                            parts.append(f" \u2014 {str(row['initials']).strip()}")
+                        start_d = str(row.get('start_str', '')).strip()
+                        end_d   = str(row.get('end_str', '')).strip()
+                        if start_d or end_d:
+                            parts.append(f" | Start: {start_d or '\u2014'} | End: {end_d or '\u2014'}")
+                        status_s = str(row.get('status', '')).strip()
+                        if status_s and status_s.lower() not in ('nan', 'none', ''):
+                            parts.append(f" | {status_s}")
+                        label = prefix + "".join(parts)
 
-                    # No annotation text beside bars, so x-axis only needs a small padding.
-                    x_range_max = bar_max_days * 1.15 if bar_max_days > 0 else 1.0
+                        # ── Actual rendered bar width in pixels ────────────────
+                        bar_px = (row['days'] / x_range_max) * EST_PLOT_WIDTH_PX
 
-                    bar_height = max(500, len(bar_df) * 42 + 100)
+                        # ── Adaptive Overlap Decision ──────────────────────────
+                        # Wide bars: allow label to partially overlap the bar tip proportionally
+                        # Small bars: keep label 100% outside to avoid Y-axis & bar collisions
+                        if bar_px >= OVERLAP_MIN_BAR_PX:
+                            raw_overlap = 8 + (bar_px - OVERLAP_MIN_BAR_PX) * OVERLAP_RATIO
+                            # Safeguard: overlap never exceeds 18% of bar width or OVERLAP_MAX_PX
+                            safe_max_overlap = min(OVERLAP_MAX_PX, bar_px * 0.18)
+                            overlap_px = min(safe_max_overlap, raw_overlap)
+                            shift = -round(overlap_px)
+                        else:
+                            shift = OUTSIDE_MARGIN_PX
+
+                        bar_annotations.append(dict(
+                            x=row['days'],
+                            y=row['wrapped_name'],
+                            text=label,
+                            xanchor='left',
+                            yanchor='middle',
+                            showarrow=False,
+                            font=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                            xref='x',
+                            yref='y',
+                            xshift=shift,
+                        ))
+
+                    bar_height = max(560, len(bar_df) * 44 + 110)
                     fig_bar.update_layout(
                         title=dict(
                             text='<b>Total Value by Project (Top 20)</b>',
-                            font=dict(size=18, color='#1e293b'),
+                            font=dict(size=16, color='#1e293b', family='Inter, Arial, sans-serif'),
                             x=0,
                             xanchor='left',
                         ),
@@ -540,15 +597,22 @@ def render_reports_page(user):
                             tickvals=bar_df['wrapped_name'].tolist(),
                             ticktext=bar_df['wrapped_name'].tolist(),
                         ),
-                        annotations=[],  # no inline text on UI; use tooltip hover instead
-                        margin=dict(l=20, r=20, t=55, b=50),
+                        annotations=bar_annotations,
+                        margin=dict(l=20, r=40, t=55, b=50),
                         height=bar_height,
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        bargap=0.35,
+                        bargap=0.32,
                         autosize=True,
+                        hoverlabel=dict(
+                            bgcolor='#ffffff',
+                            bordercolor='#94a3b8',
+                            font=dict(size=12, color='#1e293b', family='Inter, Arial, sans-serif'),
+                            align='left',
+                            namelength=-1,
+                        ),
                     )
-                    st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart")
+                    st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart", config={"responsive": True})
 
                     # ── Status Colour Legend (UI) ────────────────────────────────
                     # Only show statuses actually present in the current bar_df
