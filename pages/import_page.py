@@ -14,12 +14,12 @@ def read_excel_or_csv(uploaded_file):
     ]
     if uploaded_file.name.endswith('.csv'):
         try:
-            return pd.read_csv(uploaded_file, keep_default_na=False, na_values=na_vals)
+            return pd.read_csv(uploaded_file, keep_default_na=False, na_values=na_vals, dtype=str)
         except UnicodeDecodeError:
             uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, encoding='cp1252', keep_default_na=False, na_values=na_vals)
+            return pd.read_csv(uploaded_file, encoding='cp1252', keep_default_na=False, na_values=na_vals, dtype=str)
     else:
-        return pd.read_excel(uploaded_file, keep_default_na=False, na_values=na_vals)
+        return pd.read_excel(uploaded_file, keep_default_na=False, na_values=na_vals, dtype=str)
 
 def render_import_page():
     st.subheader("Import Data", divider="blue")
@@ -51,9 +51,9 @@ def render_import_page():
                 success, msg = import_projects(df)
                 st.success(msg) if success else st.error(msg)
         
-        sample_proj = pd.DataFrame([["P001", "High", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
+        sample_proj = pd.DataFrame([["P001", "1.1", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
         st.download_button("📥 Sample Project Excel", get_excel_download(sample_proj), "sample_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'.")
+        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'. Supports decimal priority (e.g. 1.1).")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_assign:
@@ -87,7 +87,7 @@ def render_import_page():
         
         sample_update_proj = pd.DataFrame(
             [[
-                "852", "1", "St Paul's College Trip Payment", "Not started", "Kritika Wadhwa", 
+                "852", "1.1", "St Paul's College Trip Payment", "Not started", "Kritika Wadhwa", 
                 "https://trello.com/...", "https://slack.com/...", "https://figma.com/...", 
                 "14-05-2026", "15-05-2026", "Development", "1", "1", "1", "1", "166", "117",
                 "Initial scope review complete. Awaiting client sign-off."
@@ -100,7 +100,7 @@ def render_import_page():
             ]
         )
         st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority' (numeric), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS). Optional: 'Notes' column for project notes.")
+        st.info("Required: 'Job No', 'Job Priority' (numeric or decimal e.g. 1.1), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS). Optional: 'Notes' column for project notes.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Row 3: Holiday Import ---

@@ -544,6 +544,25 @@ def _normalize_code(code):
         return s[:-2]
     return s
 
+def _parse_priority(val):
+    """Safely parse priority value, preserving exact decimal values (e.g. 1.1 -> '1.1')."""
+    if val is None or pd.isna(val):
+        return None
+    s = str(val).strip()
+    if s.lower() in ('nan', 'none', 'nat', 'null', ''):
+        return None
+    try:
+        f_val = float(s)
+        if f_val != int(f_val):
+            # Decimal value with non-zero fractional portion (e.g. 1.1, 1.25)
+            # Preserve exact representation if string, else convert float
+            return s if isinstance(val, str) else str(f_val)
+        else:
+            # Whole number (e.g. 1, 2, 11)
+            return str(int(f_val))
+    except (ValueError, TypeError):
+        return s
+
 def import_projects(df):
     """Import projects using Supabase SDK. Updates existing projects by Job No."""
     supabase = get_supabase_client()
@@ -583,19 +602,57 @@ def import_projects(df):
             if lower_val in name_to_name:
                 return name_to_name[lower_val]
             return s_val
+
+        # Flexible column aliases
+        field_aliases = {
+            'project_code': ['Job No', 'Project Code', 'Job_No', 'Project_Code', 'JobNo', 'Code'],
+            'project_name': ['Project', 'Project Name', 'Project_Name', 'ProjectName'],
+            'status': ['Status', 'Project Status', 'Search_Project'],
+            'priority': ['Job Priority', 'Priority Level', 'Job_Priority', 'Priority_Level', 'Job Priority Level', 'Priority', 'priority'],
+            'lead_engineer': ['Lead engineer', 'Lead Engineer', 'Lead', 'Lead_Engineer'],
+            'trello_link': ['Trello', 'Trello Link', 'Trello_Link']
+        }
+        df_cols_lower = {str(c).strip().lower(): str(c).strip() for c in df.columns}
+        col_mapping = {}
+        for db_f, aliases in field_aliases.items():
+            found = None
+            for a in aliases:
+                if a in df.columns:
+                    found = a
+                    break
+                if a.lower() in df_cols_lower:
+                    found = df_cols_lower[a.lower()]
+                    break
+            col_mapping[db_f] = found
+
+        def _get_val(row, db_f, default=None):
+            col = col_mapping.get(db_f)
+            if col and col in row.index and pd.notna(row[col]):
+                return row[col]
+            return default
         
         data = []
         updated_count = 0
         new_count = 0
         for _, row in df.iterrows():
-            code = _normalize_code(row.get('Job No') or row.get('Project Code') or '')
+            raw_code = _get_val(row, 'project_code', '')
+            code = _normalize_code(raw_code)
+            if not code or str(code).lower() == 'nan':
+                continue
+
+            proj_name = _get_val(row, 'project_name', '')
+            status_val = _get_val(row, 'status', 'In progress')
+            priority_val = _parse_priority(_get_val(row, 'priority'))
+            lead_val = _parse_lead_engineer(_get_val(row, 'lead_engineer'))
+            trello_val = _get_val(row, 'trello_link')
+
             record = {
                 "project_code": code,
-                "project_name": encrypt_data(str(row.get('Project', ''))),
-                "status": row.get('Status', 'In progress'),
-                "priority": row.get('Job Priority'),
-                "lead_engineer": _parse_lead_engineer(row.get('Lead engineer')),
-                "trello_link": row.get('Trello')
+                "project_name": encrypt_data(str(proj_name)),
+                "status": str(status_val) if status_val else 'In progress',
+                "priority": priority_val,
+                "lead_engineer": lead_val,
+                "trello_link": str(trello_val) if trello_val else None
             }
             data.append(_sanitize_dict(record))
             if code in existing_codes:
@@ -1168,22 +1225,10 @@ def import_project_updates(df):
         existing_res = supabase.table('project_reports').select('*').execute()
         existing_map = {r['project_code']: r for r in (existing_res.data or [])}
         
-        def _parse_priority(val):
-            if pd.isna(val): return None
-            try:
-                # Handle numeric priority (e.g. 1.0 -> "1")
-                f_val = float(val)
-                if f_val == int(f_val): return str(int(f_val))
-                return str(f_val)
-            except (ValueError, TypeError):
-                # Handle text priority (e.g. "High")
-                s = str(val).strip()
-                return s if s.lower() not in ('nan', 'none', 'nat', '') else None
-
         # Map DB fields to potential Excel column aliases for robust matching
         field_aliases = {
             'project_name': ['Project', 'Project Name', 'Project_Name', 'Priority'],
-            'priority': ['Job Priority', 'Priority', 'Job_Priority'],
+            'priority': ['Job Priority', 'Priority Level', 'Job_Priority', 'Priority_Level', 'Job Priority Level', 'Priority', 'priority'],
             'status': ['Status', 'Project Status', 'Search_Project'],
             'lead_engineer': ['Lead engineer', 'Lead Engineer', 'Lead'],
             'trello_link': ['Trello', 'Trello Link', 'Trello_Link'],

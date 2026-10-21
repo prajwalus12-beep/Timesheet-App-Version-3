@@ -13,6 +13,10 @@ from utils.chart_helpers import (
     wrap_project_name,
     format_pie_slice_label,
     build_pie_connector_shapes,
+    calculate_bar_label_overlap,
+    BAR_OVERLAP_THRESHOLD_DAYS,
+    BAR_LABEL_OVERLAP_RATIO,
+    BAR_OUTSIDE_MARGIN_PX,
     format_date_short,
     build_project_metadata_text,
     build_charts_pdf_report,
@@ -509,18 +513,11 @@ def render_reports_page(user):
 
                     bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
 
-                    # ── Proportional Label Overlap Configuration ──────────────────────────
-                    # These parameters control the overlap threshold and can be adjusted later:
-                    # - OVERLAP_MIN_BAR_PX: Minimum bar rendered width (in px) required before any overlap is allowed.
-                    #   Bars smaller than this are kept 100% outside with a clean margin (prevents collisions on small bars).
-                    # - OVERLAP_MAX_PX: Maximum pixel overlap into the bar tip for the longest bars.
-                    # - OVERLAP_RATIO: Scaling rate for overlap as bar pixel width increases beyond the threshold.
-                    # - OUTSIDE_MARGIN_PX: Spacing in pixels when the label is placed completely outside the bar.
-                    OVERLAP_MIN_BAR_PX = 80       # Threshold: bars < 80px rendered width stay 100% outside
-                    OVERLAP_MAX_PX = 22           # Cap: maximum 22px overlap into the bar tip
-                    OVERLAP_RATIO = 0.08          # Scaling rate: 0.08px overlap per extra bar pixel
+                    # ── Bar Chart Label Positioning & Overlap Configuration ───────────────
+                    # Uses the binary threshold rule:
+                    # - > 3.5 days: 50–60% overlap of the 'Xd (Y%) — Initials' section covered by bar
+                    # - <= 3.5 days: 0% overlap, 100% outside the bar with clean margin
                     EST_PLOT_WIDTH_PX = 780       # Baseline horizontal plot area width in pixels
-                    OUTSIDE_MARGIN_PX = 7         # Clean 7px spacing for small bars
 
                     # Robust x-axis upper range ensures labels have ample horizontal space across both weekly and quarterly ranges
                     x_range_max = max(bar_max_days * 2.3, bar_max_days + 8.0) if bar_max_days > 0 else 10.0
@@ -544,20 +541,22 @@ def render_reports_page(user):
                             parts.append(f" | {status_s}")
                         label = prefix + "".join(parts)
 
-                        # ── Actual rendered bar width in pixels ────────────────
+                        # Rendered bar width in pixels
                         bar_px = (row['days'] / x_range_max) * EST_PLOT_WIDTH_PX
 
-                        # ── Adaptive Overlap Decision ──────────────────────────
-                        # Wide bars: allow label to partially overlap the bar tip proportionally
-                        # Small bars: keep label 100% outside to avoid Y-axis & bar collisions
-                        if bar_px >= OVERLAP_MIN_BAR_PX:
-                            raw_overlap = 8 + (bar_px - OVERLAP_MIN_BAR_PX) * OVERLAP_RATIO
-                            # Safeguard: overlap never exceeds 18% of bar width or OVERLAP_MAX_PX
-                            safe_max_overlap = min(OVERLAP_MAX_PX, bar_px * 0.18)
-                            overlap_px = min(safe_max_overlap, raw_overlap)
-                            shift = -round(overlap_px)
-                        else:
-                            shift = OUTSIDE_MARGIN_PX
+                        # Binary positioning rule:
+                        # > 3.5 days: 50-60% overlap into the bar
+                        # <= 3.5 days: 0% overlap, entire label outside
+                        shift = calculate_bar_label_overlap(
+                            days=row['days'],
+                            pct=row['pct'],
+                            initials=row.get('initials', ''),
+                            bar_width_units=bar_px,
+                            font_size=12.0,
+                            threshold_days=BAR_OVERLAP_THRESHOLD_DAYS,
+                            overlap_ratio=BAR_LABEL_OVERLAP_RATIO,
+                            outside_margin=BAR_OUTSIDE_MARGIN_PX,
+                        )
 
                         bar_annotations.append(dict(
                             x=row['days'],
@@ -566,31 +565,31 @@ def render_reports_page(user):
                             xanchor='left',
                             yanchor='middle',
                             showarrow=False,
-                            font=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                            font=dict(size=12.0, color='#1e293b', family='Inter, Arial, sans-serif'),
                             xref='x',
                             yref='y',
                             xshift=shift,
                         ))
 
-                    bar_height = max(560, len(bar_df) * 44 + 110)
+                    bar_height = max(600, len(bar_df) * 52 + 130)
                     fig_bar.update_layout(
                         title=dict(
                             text='<b>Total Value by Project (Top 20)</b>',
-                            font=dict(size=16, color='#1e293b', family='Inter, Arial, sans-serif'),
+                            font=dict(size=18, color='#1e293b', family='Inter, Arial, sans-serif'),
                             x=0,
                             xanchor='left',
                         ),
                         xaxis=dict(
-                            title=dict(text='Days', font=dict(size=13, color='#475569')),
+                            title=dict(text='Days', font=dict(size=13.5, color='#475569')),
                             gridcolor='#f1f5f9',
                             zeroline=False,
-                            tickfont=dict(size=11, color='#64748b'),
+                            tickfont=dict(size=11.5, color='#64748b'),
                             range=[0, x_range_max],
                             automargin=True,
                         ),
                         yaxis=dict(
                             autorange='reversed',
-                            tickfont=dict(size=11, color='#1e293b'),
+                            tickfont=dict(size=12.0, color='#1e293b'),
                             showgrid=False,
                             automargin=True,
                             tickmode='array',
@@ -602,7 +601,7 @@ def render_reports_page(user):
                         height=bar_height,
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        bargap=0.32,
+                        bargap=0.38,
                         autosize=True,
                         hoverlabel=dict(
                             bgcolor='#ffffff',

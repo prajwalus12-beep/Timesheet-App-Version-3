@@ -203,6 +203,72 @@ def build_project_metadata_text(
     return f"{day_pct_str} | {joined_meta}"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Bar Chart Label Positioning & Overlap Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Fixed threshold in working days:
+# - > 3.5 days: allow approximately 50-60% of the label section to overlap the bar
+# - <= 3.5 days: 0% overlap; keep the entire label outside the bar with clean spacing
+BAR_OVERLAP_THRESHOLD_DAYS: float = 3.5
+
+# Configurable overlap ratio targeting 50%–60% of the 'Xd (Y%) — Initials' section
+BAR_LABEL_OVERLAP_RATIO: float = 0.55  # 55% overlap (within the 50%-60% target range)
+
+# Spacing in pixels / points when the label is completely outside the bar (<= 3.5 days)
+BAR_OUTSIDE_MARGIN_PX: float = 8.0
+
+
+def calculate_bar_label_overlap(
+    days: float,
+    pct: float = 0.0,
+    initials: str = "",
+    bar_width_units: float = 100.0,
+    font_size: float = 12.0,
+    char_width_factor: float = 0.58,
+    threshold_days: float = BAR_OVERLAP_THRESHOLD_DAYS,
+    overlap_ratio: float = BAR_LABEL_OVERLAP_RATIO,
+    outside_margin: float = BAR_OUTSIDE_MARGIN_PX,
+) -> float:
+    """
+    Calculate the horizontal shift/overlap for a horizontal bar label.
+
+    Binary Rule:
+      - If project duration > threshold_days (3.5 days):
+          Target overlap = 50%–60% of the 'Xd (Y%) — Initials' label section.
+          Returns negative shift (in pixels/points) so text overlaps inside the bar tip.
+          Safeguarded so text never precedes the bar origin.
+      - If project duration <= threshold_days (3.5 days):
+          0% overlap. Returns positive shift (outside_margin) keeping the entire
+          label outside the bar.
+    """
+    try:
+        d = float(days or 0.0)
+    except (ValueError, TypeError):
+        d = 0.0
+
+    if d <= threshold_days:
+        return float(outside_margin)
+
+    # Build the label section: 'Xd (Y%) — Initials'
+    d_str = format_days_display(d)
+    pct_val = float(pct or 0.0)
+    pct_str = f"{pct_val:.1f}%"
+    sec_txt = f"{d_str} ({pct_str})"
+    init_clean = str(initials).strip() if initials else ""
+    if init_clean and init_clean.lower() not in ('nan', 'none', '_', ''):
+        sec_txt += f" — {init_clean}"
+
+    # Estimated width of this section in pixels/points
+    sec_w = len(sec_txt) * (font_size * char_width_factor)
+    target_overlap = sec_w * overlap_ratio
+
+    # Safeguard: never overlap more than the bar itself minus a safety buffer (6px)
+    safe_max_overlap = max(0.0, float(bar_width_units) - 6.0)
+    overlap = min(target_overlap, safe_max_overlap)
+
+    return -float(round(overlap))
+
+
 def format_pie_slice_label(
     project_name: str,
     days: float,
@@ -491,7 +557,7 @@ def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days
         
         n_bars = len(bar_df)
         bar_slot_h = b_plot_h / max(n_bars, 1)
-        bar_height = min(22, max(12, bar_slot_h * 0.65))
+        bar_height = min(18, max(10, bar_slot_h * 0.58))
         
         for i, (_, row) in enumerate(bar_df.iterrows()):
             y_center = b_margin_b + b_plot_h - (i + 0.5) * bar_slot_h
@@ -500,22 +566,36 @@ def build_charts_pdf_report(r_start, r_end, pie_df: pd.DataFrame, total_pie_days
             p_name = str(row['project_name'])
             lines = wrap_project_name_lines(p_name, width=36)
             if len(lines) <= 1:
-                dwg_bar.add(String(b_margin_l - 8, y_center - 3, lines[0] if lines else "", fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 8, y_center - 3.5, lines[0] if lines else "", fontSize=9.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             else:
-                dwg_bar.add(String(b_margin_l - 8, y_center + 4, lines[0], fontSize=8, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
-                dwg_bar.add(String(b_margin_l - 8, y_center - 7, lines[1], fontSize=8, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 8, y_center + 4, lines[0], fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 8, y_center - 7, lines[1], fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
                 if len(lines) > 2:
-                    dwg_bar.add(String(b_margin_l - 8, y_center - 16, lines[2], fontSize=7.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                    dwg_bar.add(String(b_margin_l - 8, y_center - 16, lines[2], fontSize=8.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
                 
             bw = (row['days'] / x_max) * b_plot_w
-            color_idx = min(i, len(bar_blues) - 1)
-            fill_c = bar_blues[color_idx]
-            stroke_c = colors.HexColor('#2979b9') if color_idx >= 6 else colors.HexColor('#3a82f6')
+            status_hex = get_status_color_hex(str(row.get('status', '')))
+            fill_c = colors.HexColor(status_hex)
             
-            dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=stroke_c, strokeWidth=0.6))
+            dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=fill_c, strokeWidth=0.4))
             
-            label_text = row['metadata_text']
-            dwg_bar.add(String(b_margin_l + bw + 6, y_center - 3, label_text, fontSize=7.8, fontName="Helvetica", fillColor=colors.HexColor('#334155')))
+            label_text = str(row.get('metadata_text', ''))
+            pct_val = float(row.get('pct', 0.0))
+            if pct_val <= 0 and total_pie_days > 0:
+                pct_val = (float(row['days']) / total_pie_days) * 100
+
+            shift = calculate_bar_label_overlap(
+                days=float(row['days']),
+                pct=pct_val,
+                initials=str(row.get('initials', '')),
+                bar_width_units=bw,
+                font_size=8.8,
+                threshold_days=BAR_OVERLAP_THRESHOLD_DAYS,
+                overlap_ratio=BAR_LABEL_OVERLAP_RATIO,
+                outside_margin=BAR_OUTSIDE_MARGIN_PX,
+            )
+            text_x = b_margin_l + bw + shift
+            dwg_bar.add(String(text_x, y_center - 3, label_text, fontSize=8.8, fontName="Helvetica", fillColor=colors.HexColor('#1e293b')))
     else:
         dwg_bar.add(String(pw / 2 - 80, 220, "No bar chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
         
@@ -667,15 +747,15 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
         sub_style
     ))
 
-    dwg_bar = Drawing(pw, 580)
+    dwg_bar = Drawing(pw, 630)
 
     if not bar_df.empty:
-        b_margin_l = 260
+        b_margin_l = 280
         b_margin_r = 35
         b_margin_b = 45
         b_margin_t = 15
         b_plot_w = pw - b_margin_l - b_margin_r
-        b_plot_h = 580 - b_margin_t - b_margin_b
+        b_plot_h = 630 - b_margin_t - b_margin_b
 
         max_days = bar_df['days'].max() if not bar_df.empty else 1.0
         x_max = max(max_days * 2.3, max_days + 8.0) if max_days > 0 else 10.0
@@ -694,13 +774,15 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
         for t in ticks:
             x_pos = b_margin_l + (t / x_max) * b_plot_w
             dwg_bar.add(Line(x_pos, b_margin_b, x_pos, b_margin_b + b_plot_h, strokeColor=colors.HexColor('#f1f5f9'), strokeWidth=0.8))
-            dwg_bar.add(String(x_pos - 4, b_margin_b - 14, str(t), fontSize=9, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
+            dwg_bar.add(String(x_pos - 4, b_margin_b - 14, str(t), fontSize=10, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
 
-        dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 15, b_margin_b - 30, "Days", fontSize=11, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
+        dwg_bar.add(String(b_margin_l + b_plot_w / 2 - 15, b_margin_b - 30, "Days", fontSize=12, fontName="Helvetica-Bold", fillColor=colors.HexColor('#334155')))
 
         n_bars = len(bar_df)
         bar_slot_h = b_plot_h / max(n_bars, 1)
-        bar_height = min(24, max(14, bar_slot_h * 0.70))
+        bar_height = min(20, max(13, bar_slot_h * 0.60))
+
+        bar_total_days = bar_df['days'].sum() if 'days' in bar_df.columns else 1.0
 
         for i, (_, row) in enumerate(bar_df.iterrows()):
             y_center = b_margin_b + b_plot_h - (i + 0.5) * bar_slot_h
@@ -708,29 +790,36 @@ def build_bar_pdf_report(r_start, r_end, bar_df: pd.DataFrame) -> bytes:
             p_name = str(row['project_name'])
             lines = wrap_project_name_lines(p_name, width=42)
             if len(lines) <= 1:
-                dwg_bar.add(String(b_margin_l - 10, y_center - 3.5, lines[0] if lines else "", fontSize=9.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center - 3.5, lines[0] if lines else "", fontSize=11.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             else:
-                dwg_bar.add(String(b_margin_l - 10, y_center + 4, lines[0], fontSize=9.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
-                dwg_bar.add(String(b_margin_l - 10, y_center - 7, lines[1], fontSize=9.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center + 4, lines[0], fontSize=10.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                dwg_bar.add(String(b_margin_l - 10, y_center - 7, lines[1], fontSize=10.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
                 if len(lines) > 2:
-                    dwg_bar.add(String(b_margin_l - 10, y_center - 17, lines[2], fontSize=8.5, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
+                    dwg_bar.add(String(b_margin_l - 10, y_center - 17, lines[2], fontSize=9.0, fontName="Helvetica", textAnchor="end", fillColor=colors.HexColor('#1e293b')))
             bw = (row['days'] / x_max) * b_plot_w
             # Colour bar by project status
             status_hex = get_status_color_hex(str(row.get('status', '')))
             fill_c = colors.HexColor(status_hex)
             dwg_bar.add(Rect(b_margin_l, y_bar, bw, bar_height, fillColor=fill_c, strokeColor=fill_c, strokeWidth=0.4))
             label_text = str(row.get('metadata_text', ''))
-            # Proportional overlap for PDF: wide bars allow label to overlap tip, small bars stay outside
-            pdf_min_bar_pt = 70      # Threshold: bars < 70pt stay 100% outside
-            pdf_max_overlap_pt = 20  # Cap: max 20pt overlap into bar tip
-            if bw >= pdf_min_bar_pt:
-                raw_overlap = 6 + (bw - pdf_min_bar_pt) * 0.07
-                pdf_overlap = min(pdf_max_overlap_pt, bw * 0.18, raw_overlap)
-                text_x = b_margin_l + bw - pdf_overlap
-            else:
-                text_x = b_margin_l + bw + 7
 
-            dwg_bar.add(String(text_x, y_center - 3.5, label_text, fontSize=9.0, fontName="Helvetica", fillColor=colors.HexColor('#1e293b')))
+            pct_val = float(row.get('pct', 0.0))
+            if pct_val <= 0 and bar_total_days > 0:
+                pct_val = (float(row['days']) / bar_total_days) * 100
+
+            shift = calculate_bar_label_overlap(
+                days=float(row['days']),
+                pct=pct_val,
+                initials=str(row.get('initials', '')),
+                bar_width_units=bw,
+                font_size=10.5,
+                threshold_days=BAR_OVERLAP_THRESHOLD_DAYS,
+                overlap_ratio=BAR_LABEL_OVERLAP_RATIO,
+                outside_margin=BAR_OUTSIDE_MARGIN_PX,
+            )
+            text_x = b_margin_l + bw + shift
+
+            dwg_bar.add(String(text_x, y_center - 3.5, label_text, fontSize=10.5, fontName="Helvetica", fillColor=colors.HexColor('#1e293b')))
     else:
         dwg_bar.add(String(pw / 2 - 80, 220, "No bar chart data available.", fontSize=12, fontName="Helvetica", fillColor=colors.HexColor('#64748b')))
 
