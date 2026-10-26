@@ -623,14 +623,14 @@ def render_timesheet_page(user):
                         else:
                             st.toast(f"❌ Failed to remove holiday: {err}", icon="⚠️")
                         st.rerun()
-                elif start_of_week <= r_date_val <= end_of_week:
+                elif is_admin or (start_of_week <= r_date_val <= end_of_week):
                     act_edit, act_del, act_dup = st.columns([1, 1, 1], gap="small")
-                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Leave" if is_leave else "Edit Record", disabled=not current_emp_active):
+                    if act_edit.button(":material/edit:", key=f"edit_btn_{row['id']}", help="Edit Leave" if is_leave else "Edit Record", disabled=not (is_admin or current_emp_active)):
                         if is_leave:
                             edit_leave_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
                         else:
                             edit_form_dialog(row.to_dict(), emp_labels, current_emp_id, user["role"])
-                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Cancel Leave" if is_leave else "Delete Record", disabled=not current_emp_active):
+                    if act_del.button(":material/delete:", key=f"del_btn_{row['id']}", help="Cancel Leave" if is_leave else "Delete Record", disabled=not (is_admin or current_emp_active)):
                         st.toast(f"🗑️ Deleting entry for {row['project_code']}...", icon="⏳")
                         success, err = delete_timesheet_entry(row['id'])
                         if success:
@@ -638,7 +638,7 @@ def render_timesheet_page(user):
                         else:
                             st.toast(f"❌ Failed to delete: {err}", icon="⚠️")
                         st.rerun()
-                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Leave" if is_leave else "Duplicate Record", disabled=not current_emp_active):
+                    if act_dup.button(":material/content_copy:", key=f"dup_btn_{row['id']}", help="Duplicate Leave" if is_leave else "Duplicate Record", disabled=not (is_admin or current_emp_active)):
                         st.toast(f"📋 Duplicating entry for {row['project_code']}...", icon="⏳")
                         success, err = add_timesheet_entry(
                             row['emp_id'], row['emp_name'], row['project_code'], 

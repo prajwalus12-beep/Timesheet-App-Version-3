@@ -337,7 +337,8 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
         with col_d:
             row_date = entry_data['date']
             if isinstance(row_date, str): row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
-            entry_date = st.date_input("Date", row_date, max_value=end_of_week, format="DD-MM-YYYY", key="edit_date_modal")
+            date_max = None if user_role == "admin" else end_of_week
+            entry_date = st.date_input("Date", row_date, max_value=date_max, format="DD-MM-YYYY", key="edit_date_modal")
         with col_h:
             entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, value=float(entry_data['hours']), key="edit_hours_modal")
         
@@ -440,7 +441,7 @@ def edit_form_dialog(entry_data, emp_options, current_emp_id, user_role):
             if not entry_comment.strip():
                 st.warning("Comment is required to update the entry.")
                 st.stop()
-            if not entry_date or entry_date > end_of_week:
+            if not entry_date or (user_role != "admin" and entry_date > end_of_week):
                 st.warning("Cannot update entry to a future week date.")
             elif entry_proj_key != "None" and entry_proj_key in all_proj_options and not str(all_proj_options[entry_proj_key][0]).startswith("LEAVE-") and has_leave_for_date(emp_options[entry_emp], entry_date):
                 st.warning("This date is registered as approved leave. Standard work hours cannot be logged for leave dates.")
@@ -561,7 +562,8 @@ def edit_leave_dialog(entry_data, emp_options, current_emp_id, user_role):
             row_date = entry_data.get('date')
             if isinstance(row_date, str):
                 row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
-            entry_date = st.date_input("Date", row_date, max_value=end_of_week, format="DD-MM-YYYY", key="edit_leave_date_modal")
+            date_max = None if user_role == "admin" else end_of_week
+            entry_date = st.date_input("Date", row_date, max_value=date_max, format="DD-MM-YYYY", key="edit_leave_date_modal")
         with col_h:
             entry_hours = st.number_input("Hours", min_value=0.0, max_value=24.0, step=1.0, value=float(entry_data.get('hours', 8.0)), key="edit_leave_hours_modal")
             
