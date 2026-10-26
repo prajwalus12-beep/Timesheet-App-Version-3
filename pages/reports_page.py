@@ -12,6 +12,7 @@ from utils.chart_helpers import (
     format_project_employee_initials,
     wrap_project_name,
     format_pie_slice_label,
+    format_pie_slice_label_simple,
     build_pie_connector_shapes,
     calculate_bar_label_overlap,
     BAR_OVERLAP_THRESHOLD_DAYS,
@@ -23,6 +24,16 @@ from utils.chart_helpers import (
     build_pie_pdf_report,
     build_bar_pdf_report,
     get_status_color_hex,
+    get_duration_gradient_color,
+    get_in_progress_gradient_color,
+    get_bar_project_color,
+    split_pie_data,
+    clean_bar_project_title,
+    get_bar_day_segments,
+    PIE_COLORS,
+    PIE_MAX_SLICES_PER_CHART,
+    PIE_LABEL_TOP_N,
+    PIE_LABEL_MIN_PCT,
     STATUS_LABELS,
 )
 
@@ -307,39 +318,30 @@ def render_reports_page(user):
                 sorted_proj_records = sorted(project_records, key=lambda x: x['days'], reverse=True)
                 total_project_days = sum(p['days'] for p in sorted_proj_records)
 
-                # ── Pie Chart: Distribution by Project (Days) ──────────────────
-                MAX_PIE_SLICES = 7
-                MIN_PCT_THRESHOLD = 3.0
-
+                # ── Pie Chart: All Projects, No "Other" grouping ───────────────
+                # All projects are included. When there are more than
+                # PIE_MAX_SLICES_PER_CHART (10), the UI renders multiple
+                # stacked pie charts and the PDF uses multiple pages.
                 pie_rows = []
-                other_days = 0.0
-
-                if len(sorted_proj_records) > 5:
-                    pie_source = []
-                    for idx, p in enumerate(sorted_proj_records):
-                        pct = (p['days'] / total_project_days * 100) if total_project_days > 0 else 0
-                        # Keep top 4 unconditionally; keep up to MAX_PIE_SLICES if >= MIN_PCT_THRESHOLD (3%)
-                        if idx < MAX_PIE_SLICES and (idx < 4 or pct >= MIN_PCT_THRESHOLD):
-                            pie_source.append(p)
-                        else:
-                            other_days += p['days']
-                else:
-                    pie_source = sorted_proj_records
-                    other_days = 0.0
-
-                for p in pie_source:
+                for idx, p in enumerate(sorted_proj_records):
                     pct = (p['days'] / total_project_days * 100) if total_project_days > 0 else 0
                     meta_txt = build_project_metadata_text(
                         p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                     )
-                    outside_lbl = format_pie_slice_label(
-                        p['project_name'], p['days'], pct, p['initials'],
-                        p['start_str'], p['end_str'], p['status'],
-                        wrap_width=24, html_mode=True
-                    )
+                    # Outside label only for top 8 projects with duration >= PIE_LABEL_MIN_PCT (2.0%);
+                    # Projects below top 8 or below 2% don't display titles/labels to prevent clutter.
+                    # clean_bar_project_title strips [bracketed] content from project names.
+                    clean_name = clean_bar_project_title(p['project_name'])
+                    if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
+                        outside_lbl = format_pie_slice_label_simple(
+                            clean_name, p['days'], p['initials'],
+                            wrap_width=28, html_mode=True
+                        )
+                    else:
+                        outside_lbl = ""
                     pie_rows.append({
                         'project_name': p['project_name'],
-                        'display_name': p['project_name'],
+                        'display_name': clean_name,
                         'days': p['days'],
                         'pct': pct,
                         'initials': p['initials'],
@@ -349,49 +351,36 @@ def render_reports_page(user):
                         'metadata_text': meta_txt,
                         'outside_label': outside_lbl,
                     })
-                if other_days > 0:
-                    other_pct = (other_days / total_project_days * 100) if total_project_days > 0 else 0
-                    other_meta = f"{format_days_display(other_days)} ({other_pct:.1f}%)"
-                    other_outside_lbl = format_pie_slice_label(
-                        'Other', other_days, other_pct,
-                        wrap_width=24, html_mode=True
-                    )
-                    pie_rows.append({
-                        'project_name': 'Other',
-                        'display_name': 'Other',
-                        'days': other_days,
-                        'pct': other_pct,
-                        'initials': '',
-                        'start_str': '',
-                        'end_str': '',
-                        'status': '',
-                        'metadata_text': other_meta,
-                        'outside_label': other_outside_lbl,
-                    })
 
                 pie_df = pd.DataFrame(pie_rows)
 
-                num_pie_slices = len(pie_df)
+                # ── Build and display single pie chart (all projects) ─────────
+                # One unified donut chart; outside labels shown for top 8 only
+                # (controlled by outside_label field set above).
+                num_slices = len(pie_df)
+                slice_colors = [PIE_COLORS[i % len(PIE_COLORS)] for i in range(num_slices)]
 
-                # Pastel palette — matches the PDF and the user's reference screenshot
-                PIE_COLORS = [
-                    '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
-                    '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd', '#ccebc5', '#ffed6f'
-                ]
-
-                # Build per-slice customdata: [days_str, pct_str, full_metadata_for_hover]
+                # Build hover customdata: [days_str, pct_str, initials, status]
                 pie_customdata = []
                 for _, row in pie_df.iterrows():
                     d_str = format_days_display(row['days'])
-                    pct_str = f"{row['pct']:.1f}"
-                    meta = str(row['metadata_text'])
-                    pie_customdata.append([d_str, pct_str, meta])
+                    pct_str = f"{row['pct']:.1f}%"
+                    pie_customdata.append([
+                        d_str, pct_str,
+                        str(row.get('initials', '')),
+                        str(row.get('status', '')),
+                    ])
 
-                # Build the pie figure — outside wrapped labels with clean native leader lines
+                st.markdown(
+                    "<h4 style='text-align: center; color: #1e293b; font-weight: 600; "
+                    "font-size: 1.25rem; margin-top: 14px; margin-bottom: 6px;'>Total Value by Project</h4>",
+                    unsafe_allow_html=True
+                )
+
                 fig_pie = go.Figure(go.Pie(
                     labels=pie_df['project_name'],
                     values=pie_df['days'],
-                    hole=0.45,
+                    hole=0.42,
                     customdata=pie_customdata,
                     text=pie_df['outside_label'],
                     textinfo='text',
@@ -400,25 +389,23 @@ def render_reports_page(user):
                     outsidetextfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
                     hovertemplate=(
                         '<b>%{label}</b><br>'
-                        '%{customdata[2]}'
+                        '%{customdata[0]} (%{customdata[1]})<br>'
+                        'Employees: %{customdata[2]}<br>'
+                        'Status: %{customdata[3]}'
                         '<extra></extra>'
                     ),
-                    marker=dict(
-                        colors=PIE_COLORS[:num_pie_slices],
-                        line=dict(color='#ffffff', width=2)
-                    ),
+                    marker=dict(colors=slice_colors, line=dict(color='#ffffff', width=2)),
                     showlegend=False,
                     sort=False,
                     direction='clockwise',
-                    rotation=0,
-                    domain=dict(x=[0.20, 0.80], y=[0.14, 0.80]),
+                    rotation=210,
+                    domain=dict(x=[0.12, 0.88], y=[0.04, 0.84]),
                 ))
-
                 fig_pie.update_layout(
                     title=dict(text=''),
                     shapes=[],
-                    margin=dict(l=30, r=30, t=45, b=55),
-                    height=820,
+                    margin=dict(l=40, r=40, t=25, b=35),
+                    height=720,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                     autosize=True,
@@ -430,16 +417,8 @@ def render_reports_page(user):
                         namelength=-1,
                     ),
                 )
-
-                # Dedicated HTML header above chart canvas avoids label-title overlap completely
-                st.markdown(
-                    "<h4 style='text-align: center; color: #1e293b; font-weight: 600; "
-                    "font-size: 1.25rem; margin-top: 6px; margin-bottom: 2px;'>Total Value by Project</h4>",
-                    unsafe_allow_html=True
-                )
-
-                # Full-width responsive chart — wrapped outside labels prevent clipping
-                st.plotly_chart(fig_pie, use_container_width=True, key="report_pie_chart", config={"responsive": True})
+                st.plotly_chart(fig_pie, use_container_width=True,
+                                key="report_pie_chart_0", config={"responsive": True})
 
                 # ── Pie Chart PDF Export ───────────────────────────────────────
                 try:
@@ -461,15 +440,16 @@ def render_reports_page(user):
 
                 # ── Bar Chart: Total Value by Project (Days) ──────────────────
                 if project_records:
-                    bar_top20 = sorted_proj_records[:20]
-                    bar_total_days = sum(p['days'] for p in bar_top20)
+                    bar_top_projects = sorted_proj_records[:30] if len(sorted_proj_records) > 30 else sorted_proj_records
+                    bar_total_days = sum(p['days'] for p in bar_top_projects)
                     bar_rows = []
-                    for p in bar_top20:
+                    for p in bar_top_projects:
                         pct = (p['days'] / bar_total_days * 100) if bar_total_days > 0 else 0
                         meta_txt = build_project_metadata_text(
                             p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                         )
-                        wrapped = wrap_project_name(p['project_name'], width=30, html=True)
+                        clean_proj_name = clean_bar_project_title(p['project_name'])
+                        wrapped = wrap_project_name(clean_proj_name, width=30, html=True)
                         bar_rows.append({
                             'project_name': p['project_name'],
                             'project_code': p['project_code'],
@@ -492,14 +472,142 @@ def render_reports_page(user):
                         bar_df['metadata_text']
                     ))
 
+                    # In Progress relative green gradient calculation
+                    in_prog_days = [
+                        float(r['days']) for _, r in bar_df.iterrows()
+                        if str(r.get('status', '')).strip().lower() == 'in progress'
+                    ]
+                    in_prog_min = min(in_prog_days) if in_prog_days else 0.0
+                    in_prog_max = max(in_prog_days) if in_prog_days else 1.0
+
+                    bar_colors = [
+                        get_bar_project_color(r['status'], r['days'], in_prog_min, in_prog_max)
+                        for _, r in bar_df.iterrows()
+                    ]
+
+                    bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
+
+                    # ── Bar Chart Label Positioning & Overlap Configuration ───────────────
+                    # ── Bar Chart Label Positioning Configuration ─────────────────────────
+                    # If project duration > 15 days:
+                    #   - Rendered using two bars connected vertically with a very small/thin gap:
+                    #     * Top bar: 15.0 days benchmark
+                    #     * Bottom bar: total project duration
+                    #   - The metadata text is placed to the right of the bottom bar with an 8px margin.
+                    # If project duration <= 15 days:
+                    #   - Rendered as a single bar with the metadata text placed to the right with an 8px margin.
+                    # All font sizes are set to 9.5pt.
+                    x_range_max = max(bar_max_days * 2.3, bar_max_days + 8.0) if bar_max_days > 0 else 10.0
+
+                    bar_x = []
+                    bar_y = []
+                    bar_widths = []
+                    bar_colors_list = []
+                    bar_customdata_list = []
+                    bar_annotations = []
+
+                    y_tickvals = []
+                    y_ticktext = []
+
+                    for idx, row in bar_df.iterrows():
+                        y_center = idx
+                        y_tickvals.append(y_center)
+                        y_ticktext.append(row['wrapped_name'])
+
+                        p_days = float(row['days'])
+                        p_color = bar_colors[idx]
+                        p_custom = (
+                            row['project_name'],
+                            format_days_display(p_days),
+                            row['metadata_text']
+                        )
+
+                        d_str = format_days_display(p_days)
+                        total_project_days = float(bar_df['days'].sum()) if 'days' in bar_df.columns and bar_df['days'].sum() > 0 else 1.0
+
+                        init_str = str(row.get('initials', '')).strip()
+                        prefix_meta = f" \u2014 {init_str}" if (init_str and init_str.lower() not in ('nan', 'none', '_', '')) else ""
+                        start_d = str(row.get('start_str', '')).strip()
+                        end_d   = str(row.get('end_str', '')).strip()
+                        if start_d:
+                            prefix_meta += f" | start: {start_d}"
+
+                        rem_meta_parts = []
+                        if end_d:
+                            rem_meta_parts.append(f" | End: {end_d}")
+                        status_s = str(row.get('status', '')).strip()
+                        if status_s and status_s.lower() not in ('nan', 'none', ''):
+                            rem_meta_parts.append(f" | {status_s}")
+                        remaining_meta = "".join(rem_meta_parts)
+
+                        segs = get_bar_day_segments(p_days, max_per_row=15.0)
+                        n_segs = len(segs)
+
+                        # Bar height/thickness: all bars (single or split) maintain equal height
+                        bar_h_thickness = 0.28
+                        # Spacing between consecutive bars of the same project
+                        seg_step = 0.34
+
+                        for s_idx, seg_d in enumerate(segs):
+                            if n_segs == 1:
+                                y_bar_pos = y_center
+                            else:
+                                # Stack consecutive bars vertically around y_center
+                                y_bar_pos = y_center + (s_idx - (n_segs - 1) / 2.0) * seg_step
+
+                            bar_x.append(seg_d)
+                            bar_y.append(y_bar_pos)
+                            bar_widths.append(bar_h_thickness)
+                            bar_colors_list.append(p_color)
+                            bar_customdata_list.append(p_custom)
+
+                            # Only the first bar shows a label, using total project days.
+                            # Subsequent bars have no annotation at all.
+                            if s_idx > 0:
+                                continue
+
+                            total_pct = (p_days / total_project_days) * 100.0
+                            inside_text = f"{format_days_display(p_days)} ({total_pct:.1f}%){prefix_meta}"
+                            full_meta_str = f"{inside_text}{remaining_meta}"
+
+                            if seg_d > 3.5:
+                                x_start = min(3.5, seg_d * 0.25)
+                                full_label_html = f"<b>{inside_text}</b>{remaining_meta}"
+                                bar_annotations.append(dict(
+                                    x=x_start,
+                                    y=y_bar_pos,
+                                    text=full_label_html,
+                                    xanchor='left',
+                                    yanchor='middle',
+                                    showarrow=False,
+                                    font=dict(size=9.5, color='#000000', family='Inter, Arial, sans-serif'),
+                                    xref='x',
+                                    yref='y',
+                                ))
+                            else:
+                                # Outside the bar for bars <= 3.5 days
+                                bar_annotations.append(dict(
+                                    x=seg_d,
+                                    y=y_bar_pos,
+                                    text=full_meta_str,
+                                    xanchor='left',
+                                    yanchor='middle',
+                                    showarrow=False,
+                                    font=dict(size=9.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                                    xref='x',
+                                    yref='y',
+                                    xshift=8.0,
+                                ))
+
                     fig_bar = go.Figure(go.Bar(
-                        x=bar_df['days'],
-                        y=bar_df['wrapped_name'],
+                        x=bar_x,
+                        y=bar_y,
+                        width=bar_widths,
                         orientation='h',
-                        customdata=bar_customdata,
+                        customdata=bar_customdata_list,
                         cliponaxis=False,
                         marker=dict(
-                            color=[get_status_color_hex(s) for s in bar_df['status']],
+                            color=bar_colors_list,
                             line=dict(color='rgba(255,255,255,0.4)', width=0.5)
                         ),
                         hovertemplate=(
@@ -509,69 +617,11 @@ def render_reports_page(user):
                         ),
                         text=None,
                         textposition='none',
+                        showlegend=False,
                     ))
 
-                    bar_max_days = bar_df['days'].max() if not bar_df.empty else 1.0
-
-                    # ── Bar Chart Label Positioning & Overlap Configuration ───────────────
-                    # Uses the binary threshold rule:
-                    # - > 3.5 days: 50–60% overlap of the 'Xd (Y%) — Initials' section covered by bar
-                    # - <= 3.5 days: 0% overlap, 100% outside the bar with clean margin
-                    EST_PLOT_WIDTH_PX = 780       # Baseline horizontal plot area width in pixels
-
-                    # Robust x-axis upper range ensures labels have ample horizontal space across both weekly and quarterly ranges
-                    x_range_max = max(bar_max_days * 2.3, bar_max_days + 8.0) if bar_max_days > 0 else 10.0
-
-                    bar_annotations = []
-                    for _, row in bar_df.iterrows():
-                        # Build a compact label: bold prefix + plain metadata
-                        d_str = format_days_display(row['days'])
-                        pct_str = f"{row['pct']:.1f}%"
-                        prefix = f"<b>{d_str} ({pct_str})</b>"
-                        # Build the rest: initials | Start ... | End ... | Status
-                        parts = []
-                        if str(row.get('initials', '')).strip():
-                            parts.append(f" \u2014 {str(row['initials']).strip()}")
-                        start_d = str(row.get('start_str', '')).strip()
-                        end_d   = str(row.get('end_str', '')).strip()
-                        if start_d or end_d:
-                            parts.append(f" | Start: {start_d or '\u2014'} | End: {end_d or '\u2014'}")
-                        status_s = str(row.get('status', '')).strip()
-                        if status_s and status_s.lower() not in ('nan', 'none', ''):
-                            parts.append(f" | {status_s}")
-                        label = prefix + "".join(parts)
-
-                        # Rendered bar width in pixels
-                        bar_px = (row['days'] / x_range_max) * EST_PLOT_WIDTH_PX
-
-                        # Binary positioning rule:
-                        # > 3.5 days: 50-60% overlap into the bar
-                        # <= 3.5 days: 0% overlap, entire label outside
-                        shift = calculate_bar_label_overlap(
-                            days=row['days'],
-                            pct=row['pct'],
-                            initials=row.get('initials', ''),
-                            bar_width_units=bar_px,
-                            font_size=12.0,
-                            threshold_days=BAR_OVERLAP_THRESHOLD_DAYS,
-                            overlap_ratio=BAR_LABEL_OVERLAP_RATIO,
-                            outside_margin=BAR_OUTSIDE_MARGIN_PX,
-                        )
-
-                        bar_annotations.append(dict(
-                            x=row['days'],
-                            y=row['wrapped_name'],
-                            text=label,
-                            xanchor='left',
-                            yanchor='middle',
-                            showarrow=False,
-                            font=dict(size=12.0, color='#1e293b', family='Inter, Arial, sans-serif'),
-                            xref='x',
-                            yref='y',
-                            xshift=shift,
-                        ))
-
-                    bar_height = max(600, len(bar_df) * 52 + 130)
+                    # Dynamic height: 75px per project + header, minimum 650px
+                    bar_height = max(650, len(bar_df) * 75 + 150)
                     fig_bar.update_layout(
                         title=dict(
                             text='<b>Total Value by Project (Top 20)</b>',
@@ -583,25 +633,26 @@ def render_reports_page(user):
                             title=dict(text='Days', font=dict(size=13.5, color='#475569')),
                             gridcolor='#f1f5f9',
                             zeroline=False,
-                            tickfont=dict(size=11.5, color='#64748b'),
+                            tickfont=dict(size=9.5, color='#64748b'),
                             range=[0, x_range_max],
                             automargin=True,
                         ),
                         yaxis=dict(
                             autorange='reversed',
-                            tickfont=dict(size=12.0, color='#1e293b'),
+                            tickfont=dict(size=9.5, color='#1e293b'),
                             showgrid=False,
                             automargin=True,
                             tickmode='array',
-                            tickvals=bar_df['wrapped_name'].tolist(),
-                            ticktext=bar_df['wrapped_name'].tolist(),
+                            tickvals=y_tickvals,
+                            ticktext=y_ticktext,
+                            range=[-0.6, len(bar_df) - 0.4] if not bar_df.empty else [0, 1],
                         ),
                         annotations=bar_annotations,
                         margin=dict(l=20, r=40, t=55, b=50),
                         height=bar_height,
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        bargap=0.38,
+                        bargap=0.45,
                         autosize=True,
                         hoverlabel=dict(
                             bgcolor='#ffffff',
@@ -613,34 +664,44 @@ def render_reports_page(user):
                     )
                     st.plotly_chart(fig_bar, use_container_width=True, key="report_bar_chart", config={"responsive": True})
 
-                    # ── Status Colour Legend (UI) ────────────────────────────────
-                    # Only show statuses actually present in the current bar_df
-                    present_statuses_ui = set(
-                        str(s).strip().lower() for s in bar_df['status'].dropna().unique()
-                    )
-                    visible_legend = [
-                        (lbl, hex_c) for lbl, hex_c in STATUS_LABELS
-                        if lbl.lower() in present_statuses_ui
-                        or lbl.lower().replace(' / ', ' - ') in present_statuses_ui
-                    ] or list(STATUS_LABELS)  # fallback: show all
+                    # ── Status Legend (below chart, compact & visually tied) ───────
+                    present_statuses = []
+                    for s in bar_df['status'].dropna().unique():
+                        s_c = str(s).strip()
+                        if s_c and s_c.lower() not in ('nan', 'none', '_', ''):
+                            present_statuses.append(s_c)
+                    order_map = {'in progress': 1, 'in testing': 2, 'awaiting info': 3, 'ongoing': 4}
+                    sorted_statuses = sorted(set(present_statuses), key=lambda x: order_map.get(x.lower(), 99))
 
-                    legend_swatches = "".join(
-                        f'<span style="display:inline-flex;align-items:center;gap:5px;'
-                        f'margin:3px 10px 3px 0;white-space:nowrap;">'
-                        f'<span style="display:inline-block;width:13px;height:13px;'
-                        f'border-radius:3px;background:{hex_c};flex-shrink:0;"></span>'
-                        f'<span style="font-size:0.78rem;color:#1e293b;">{lbl}</span></span>'
-                        for lbl, hex_c in visible_legend
+                    legend_spans = []
+                    for st_name in sorted_statuses:
+                        st_l = st_name.lower()
+                        if st_l == 'in progress':
+                            legend_spans.append(
+                                '<span style="display:inline-flex;align-items:center;gap:6px;">'
+                                '<span style="width:13px;height:13px;border-radius:3px;'
+                                'background:linear-gradient(90deg, #bbf7d0, #4ade80, #22c55e);display:inline-block;"></span>'
+                                '<span style="font-size:0.80rem;font-weight:600;color:#334155;">In Progress</span>'
+                                '</span>'
+                            )
+                        else:
+                            c_hex = get_status_color_hex(st_l)
+                            legend_spans.append(
+                                f'<span style="display:inline-flex;align-items:center;gap:6px;">'
+                                f'<span style="width:13px;height:13px;border-radius:3px;background:{c_hex};display:inline-block;"></span>'
+                                f'<span style="font-size:0.80rem;font-weight:600;color:#334155;">{st_name.title()}</span>'
+                                f'</span>'
+                            )
+
+                    legend_html = (
+                        '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;'
+                        'gap:20px;margin-top:2px;margin-bottom:14px;padding:8px 14px;'
+                        'border-top:1px solid #e2e8f0;background:rgba(248,250,252,0.6);border-radius:6px;">'
+                        '<span style="font-size:0.75rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Status Legend:</span>'
+                        + "".join(legend_spans) +
+                        '</div>'
                     )
-                    st.markdown(
-                        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
-                        f'padding:10px 14px;margin-top:4px;margin-bottom:8px;">'
-                        f'<div style="font-size:0.8rem;font-weight:600;color:#475569;'
-                        f'margin-bottom:6px;">Status Legend</div>'
-                        f'<div style="display:flex;flex-wrap:wrap;gap:2px;">'
-                        f'{legend_swatches}</div></div>',
-                        unsafe_allow_html=True
-                    )
+                    st.markdown(legend_html, unsafe_allow_html=True)
 
                     # ── Bar Chart PDF Export ───────────────────────────────────
                     try:

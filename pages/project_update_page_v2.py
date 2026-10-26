@@ -83,7 +83,6 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
     """
     export_cols_map = {
         'project_code': 'Job No',
-        'priority': 'Job Priority',
         'project_name': 'Project',
         'status': 'Status',
         'lead_engineer': 'Lead engineer',
@@ -93,7 +92,6 @@ def _generate_excel_buffer(df, highlight_updated=False, only_updated_values=Fals
         'prototype_link': 'Prototype',
         'slack_link': 'Slack',
         'estimated_days': 'Estimated Days',
-        'actual_days': 'Actual Days',
         'checkbox_bc': 'CheckBoxe BC',
         'checkbox_trello': 'CheckBoxe Trello',
         'checkbox_wa': 'CheckBoxe WA',
@@ -540,6 +538,8 @@ def _render_react_component(projects_list, lead_engineers, phase_options, status
                 for proj_code, changes in edits.items():
                     update_payload = {}
                     for col, new_val in changes.items():
+                        if col == 'priority':
+                            continue  # Priority is not editable
                         update_payload[col] = new_val
                         flag_col = f"{col}_updated"
                         if flag_col in df.columns:

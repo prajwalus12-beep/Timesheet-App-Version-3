@@ -694,6 +694,15 @@ input[type=number] {
   border-radius: 0.4rem !important;
 }
 
+.priority-field-small:disabled,
+.disabled-field:disabled {
+  background-color: #f1f5f9 !important;
+  color: #64748b !important;
+  cursor: not-allowed !important;
+  border-color: #cbd5e1 !important;
+  user-select: none;
+}
+
 .lead-select-main, .status-select-main {
   font-weight: normal !important;
   font-size: 0.85rem !important;

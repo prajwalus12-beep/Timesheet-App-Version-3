@@ -121,7 +121,6 @@ def _generate_fmp_excel(df: pd.DataFrame) -> bytes:
         'prototype_link': 'Prototype',
         'slack_link':     'Slack',
         'estimated_days': 'Estimated Days',
-        'actual_days':    'Actual Days',
         'checkbox_bc':    'CheckBoxe BC',
         'checkbox_trello':'CheckBoxe Trello',
         'checkbox_wa':    'CheckBoxe WA',
@@ -206,7 +205,6 @@ def _generate_ts_excel(df: pd.DataFrame) -> bytes:
         'start_date':    'Start Date',
         'end_date':      'End Date',
         'estimated_days':'Estimated Days',
-        'actual_days':   'Actual Days',
     }
 
     clean = df.copy()

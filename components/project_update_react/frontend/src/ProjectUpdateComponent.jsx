@@ -186,10 +186,68 @@ function ProjectUpdateComponent(props) {
     }
   };
 
+  // Parse date string (YYYY-MM-DD or DD-MM-YYYY or Date object) to days since UTC epoch
+  const parseDateToUtcDays = (dateVal) => {
+    if (!dateVal) return null;
+    if (dateVal instanceof Date) {
+      if (isNaN(dateVal.getTime())) return null;
+      return Date.UTC(dateVal.getFullYear(), dateVal.getMonth(), dateVal.getDate()) / 86400000;
+    }
+    const s = String(dateVal).split("T")[0].trim();
+    if (!s) return null;
+
+    // Check YYYY-MM-DD
+    const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoMatch) {
+      const y = parseInt(isoMatch[1], 10);
+      const m = parseInt(isoMatch[2], 10) - 1;
+      const d = parseInt(isoMatch[3], 10);
+      return Date.UTC(y, m, d) / 86400000;
+    }
+
+    // Check DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmyMatch) {
+      const d = parseInt(dmyMatch[1], 10);
+      const m = parseInt(dmyMatch[2], 10) - 1;
+      const y = parseInt(dmyMatch[3], 10);
+      return Date.UTC(y, m, d) / 86400000;
+    }
+
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) {
+      return Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()) / 86400000;
+    }
+    return null;
+  };
+
+  // EST = End Date − Start Date
+  const calculateEstDays = (startDate, endDate) => {
+    const d1 = parseDateToUtcDays(startDate);
+    const d2 = parseDateToUtcDays(endDate);
+    if (d1 === null || d2 === null) return null;
+    const diff = Math.round(d2 - d1);
+    return diff >= 0 ? diff : 0;
+  };
+
   // ---- Editing ----
   const handleUpdate = (projectCode, field, value) => {
     setProjects((prev) =>
-      prev.map((p) => (p.project_code === projectCode ? { ...p, [field]: value } : p))
+      prev.map((p) => {
+        if (p.project_code !== projectCode) return p;
+        const updated = { ...p, [field]: value };
+        if (field === "start_date" || field === "end_date") {
+          const sDate = field === "start_date" ? value : p.start_date;
+          const eDate = field === "end_date" ? value : p.end_date;
+          if (sDate && eDate) {
+            const est = calculateEstDays(sDate, eDate);
+            if (est !== null) {
+              updated.estimated_days = est;
+            }
+          }
+        }
+        return updated;
+      })
     );
   };
 
@@ -228,7 +286,7 @@ function ProjectUpdateComponent(props) {
       if (!server) return;
       const changes = {};
       const editableFields = [
-        "project_name", "lead_engineer", "priority", "start_date", "end_date",
+        "project_name", "lead_engineer", "start_date", "end_date",
         "status", "trello_link", "prototype_link", "slack_link",
         "checkbox_bc", "checkbox_trello", "checkbox_wa", "checkbox_ws", "estimated_days",
         "notes"
@@ -319,7 +377,7 @@ function ProjectUpdateComponent(props) {
     if (isDirty(projectCode, field)) cls += " dirty";
     const proj = projects.find(p => p.project_code === projectCode);
     if (proj && !isDirty(projectCode, field) && isDbUpdated(proj, field)) cls += " db-updated";
-    if (isFieldEmpty(value)) cls += " pu-highlight-empty";
+    if (field !== "priority" && isFieldEmpty(value)) cls += " pu-highlight-empty";
     return cls;
   };
 
@@ -799,9 +857,10 @@ function ProjectUpdateComponent(props) {
                           </select>
                           <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", marginTop: "0.15rem" }}>
                             <input type="text" value={project.priority || ""}
-                              onChange={(e) => handleUpdate(project.project_code, "priority", e.target.value.toUpperCase())}
-                              className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small")}
-                              disabled={readOnly || isCompact}
+                              className={cellInputClass(project.project_code, "priority", project.priority, "priority-field-small disabled-field")}
+                              disabled={true}
+                              readOnly={true}
+                              title="Job Priority is not editable"
                               placeholder="Priority" />
                               
                             {!isCompact && (
