@@ -380,9 +380,11 @@ def _create_pie_plotly_fig(pie_df, total_pie_days: float, chart_index: int = 0, 
         for idx, (_, row) in enumerate(pie_df.iterrows()):
             d = float(row[val_col])
             pct = (d / total_pie_days * 100) if total_pie_days > 0 else 0
+            # Use display_name_with_code if available, otherwise fall back to project_name
+            display_name = str(row.get('display_name_with_code', row.get('project_name', '')))
             if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
                 text_list.append(format_pie_slice_label_simple(
-                    clean_bar_project_title(str(row.get('project_name', ''))), d,
+                    display_name, d,
                     str(row.get('initials', '')), wrap_width=22, html_mode=True
                 ))
             else:
@@ -397,9 +399,11 @@ def _create_pie_plotly_fig(pie_df, total_pie_days: float, chart_index: int = 0, 
             str(row.get('initials', '')), str(row.get('status', '')),
         ])
 
+    # Use display_name_with_code for labels if available
+    label_col = 'display_name_with_code' if 'display_name_with_code' in pie_df.columns else 'project_name'
     title_suffix = f" ({chart_index + 1}/{chart_total})" if chart_total > 1 else ""
     fig = go.Figure(go.Pie(
-        labels=pie_df['project_name'],
+        labels=pie_df[label_col],
         values=pie_df[val_col],
         hole=0.42,
         customdata=customdata,
@@ -470,9 +474,11 @@ def _build_rl_pie_drawing(pie_df, total_pie_days: float, pw: float, drawing_h: f
     for idx, (_, row) in enumerate(pie_df.iterrows()):
         d = float(row[val_col])
         pct = (d / total_pie_days * 100) if total_pie_days > 0 else 0
+        # Use display_name_with_code if available, otherwise fall back to project_name
+        display_name = str(row.get('display_name_with_code', row.get('project_name', '')))
         if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
             pie_labels.append(format_pie_slice_label_simple(
-                str(row.get('project_name', '')), d,
+                display_name, d,
                 str(row.get('initials', '')), wrap_width=18, html_mode=False
             ))
         else:
@@ -575,7 +581,13 @@ def _build_rl_bar_drawing(
     row_lines = []
     slot_heights = []
     for _, row in bar_df.iterrows():
-        title = clean_bar_project_title(str(row['project_name']))
+        # Use display_name_with_code if available, otherwise fall back to project_name
+        if 'display_name_with_code' in bar_df.columns:
+            title = str(row['display_name_with_code'])
+        else:
+            p_code = str(row.get('project_code', '')).strip()
+            p_name = clean_bar_project_title(str(row['project_name']))
+            title = f"[{p_code}] {p_name}" if p_code else p_name
         lns = wrap_project_name_lines(title, width=wrap_width)[:3]
         row_lines.append(lns)
         n_text_lines = max(1, len(lns))

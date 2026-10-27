@@ -332,16 +332,20 @@ def render_reports_page(user):
                     # Projects below top 8 or below 2% don't display titles/labels to prevent clutter.
                     # clean_bar_project_title strips [bracketed] content from project names.
                     clean_name = clean_bar_project_title(p['project_name'])
+                    # Format display name with project code
+                    display_name_with_code = f"[{p['project_code']}] {clean_name}" if p['project_code'] else clean_name
                     if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
                         outside_lbl = format_pie_slice_label_simple(
-                            clean_name, p['days'], p['initials'],
+                            display_name_with_code, p['days'], p['initials'],
                             wrap_width=28, html_mode=True
                         )
                     else:
                         outside_lbl = ""
                     pie_rows.append({
                         'project_name': p['project_name'],
+                        'project_code': p['project_code'],
                         'display_name': clean_name,
+                        'display_name_with_code': display_name_with_code,
                         'days': p['days'],
                         'pct': pct,
                         'initials': p['initials'],
@@ -360,12 +364,13 @@ def render_reports_page(user):
                 num_slices = len(pie_df)
                 slice_colors = [PIE_COLORS[i % len(PIE_COLORS)] for i in range(num_slices)]
 
-                # Build hover customdata: [days_str, pct_str, initials, status]
+                # Build hover customdata: [project_code, days_str, pct_str, initials, status]
                 pie_customdata = []
                 for _, row in pie_df.iterrows():
                     d_str = format_days_display(row['days'])
                     pct_str = f"{row['pct']:.1f}%"
                     pie_customdata.append([
+                        str(row.get('project_code', '')),
                         d_str, pct_str,
                         str(row.get('initials', '')),
                         str(row.get('status', '')),
@@ -378,7 +383,7 @@ def render_reports_page(user):
                 )
 
                 fig_pie = go.Figure(go.Pie(
-                    labels=pie_df['project_name'],
+                    labels=pie_df['display_name_with_code'],
                     values=pie_df['days'],
                     hole=0.42,
                     customdata=pie_customdata,
@@ -388,10 +393,10 @@ def render_reports_page(user):
                     textfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
                     outsidetextfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
                     hovertemplate=(
-                        '<b>%{label}</b><br>'
-                        '%{customdata[0]} (%{customdata[1]})<br>'
-                        'Employees: %{customdata[2]}<br>'
-                        'Status: %{customdata[3]}'
+                        '<b>[%{customdata[0]}] %{label}</b><br>'
+                        '%{customdata[1]} (%{customdata[2]})<br>'
+                        'Employees: %{customdata[3]}<br>'
+                        'Status: %{customdata[4]}'
                         '<extra></extra>'
                     ),
                     marker=dict(colors=slice_colors, line=dict(color='#ffffff', width=2)),
@@ -449,10 +454,13 @@ def render_reports_page(user):
                             p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                         )
                         clean_proj_name = clean_bar_project_title(p['project_name'])
-                        wrapped = wrap_project_name(clean_proj_name, width=30, html=True)
+                        # Add project code to the display name
+                        display_name_with_code = f"[{p['project_code']}] {clean_proj_name}" if p['project_code'] else clean_proj_name
+                        wrapped = wrap_project_name(display_name_with_code, width=30, html=True)
                         bar_rows.append({
                             'project_name': p['project_name'],
                             'project_code': p['project_code'],
+                            'display_name_with_code': display_name_with_code,
                             'hours': p['hours'],
                             'days': p['days'],
                             'pct': pct,
@@ -465,8 +473,9 @@ def render_reports_page(user):
                         })
                     bar_df = pd.DataFrame(bar_rows)
 
-                    # Customdata for hover: [full_name, formatted_days, metadata_text]
+                    # Customdata for hover: [project_code, full_name, formatted_days, metadata_text]
                     bar_customdata = list(zip(
+                        bar_df['project_code'],
                         bar_df['project_name'],
                         [format_days_display(d) for d in bar_df['days']],
                         bar_df['metadata_text']
@@ -516,7 +525,9 @@ def render_reports_page(user):
 
                         p_days = float(row['days'])
                         p_color = bar_colors[idx]
+                        p_code = str(row.get('project_code', '')).strip()
                         p_custom = (
+                            p_code,
                             row['project_name'],
                             format_days_display(p_days),
                             row['metadata_text']
@@ -611,8 +622,8 @@ def render_reports_page(user):
                             line=dict(color='rgba(255,255,255,0.4)', width=0.5)
                         ),
                         hovertemplate=(
-                            '<b>%{customdata[0]}</b><br>'
-                            '%{customdata[2]}'
+                            '<b>[%{customdata[0]}] %{customdata[1]}</b><br>'
+                            '%{customdata[3]}'
                             '<extra></extra>'
                         ),
                         text=None,
