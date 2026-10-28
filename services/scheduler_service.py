@@ -21,6 +21,7 @@ _lock = threading.Lock()
 
 JOB_ID = "timesheet_reminder_cron"
 CLEANUP_JOB_ID = "ts_reminder_log_cleanup"
+WEEKLY_REPORT_JOB_ID = "weekly_report_email_cron"
 
 
 def _get_scheduler():
@@ -176,21 +177,31 @@ def initialize_scheduler():
 
     Called once on app startup. Safe if called multiple times.
     """
-    from database.queries import get_app_setting
+    from database.queries import get_app_setting, get_report_email_settings
 
+    # Initialize timesheet reminder schedule
     enabled_str = get_app_setting('timesheet_reminder_enabled', 'false')
     days_str = get_app_setting('timesheet_reminder_days', 'thu')
     time_str = get_app_setting('timesheet_reminder_time', '10:00')
 
     enabled = enabled_str.lower() == 'true'
     update_reminder_schedule(enabled, days_str, time_str)
+    
+    # Initialize weekly report email schedule
+    report_settings = get_report_email_settings()
+    update_weekly_report_schedule(
+        enabled=report_settings.get('enabled', False),
+        day_str=report_settings.get('day', 'fri'),
+        time_str=report_settings.get('time', '17:00')
+    )
 
     # Register the log-cleanup job unconditionally — it is always active.
     scheduler = _get_scheduler()
     with _lock:
         _schedule_cleanup_job(scheduler)
 
-    logger.info("Scheduler initialized. Enabled=%s, Days=%s, Time=%s", enabled, days_str, time_str)
+    logger.info("Scheduler initialized. Timesheet Reminder: Enabled=%s, Days=%s, Time=%s | Weekly Report: Enabled=%s", 
+                enabled, days_str, time_str, report_settings.get('enabled', False))
 
 
 def get_next_run_time():
@@ -206,3 +217,95 @@ def is_job_scheduled():
     """Return True if the reminder job is currently scheduled."""
     scheduler = _get_scheduler()
     return scheduler.get_job(JOB_ID) is not None
+
+
+
+# ==================================================================
+# WEEKLY REPORT EMAIL JOB
+# ==================================================================
+
+def _weekly_report_job():
+    """Callback executed by the scheduler for weekly report emails."""
+    from database.queries import get_report_email_settings
+    import datetime as dt
+    
+    logger.info("Weekly report cron job triggered at %s", dt.datetime.now().isoformat())
+    
+    # Check if enabled
+    settings = get_report_email_settings()
+    if not settings.get('enabled', False):
+        logger.info("Weekly report email is disabled — skipping.")
+        return
+    
+    recipients = settings.get('recipients', [])
+    if not recipients:
+        logger.warning("No recipients configured for weekly report email — skipping.")
+        return
+    
+    # Generate and send report
+    from services.report_email_service import generate_and_send_weekly_report
+    success, message = generate_and_send_weekly_report(
+        recipients=recipients,
+        trigger_type='scheduled',
+        sent_by='system'
+    )
+    
+    if success:
+        logger.info("Weekly report email sent successfully: %s", message)
+    else:
+        logger.error("Weekly report email failed: %s", message)
+
+
+def update_weekly_report_schedule(enabled, day_str, time_str):
+    """Update (or remove) the scheduled weekly report job.
+    
+    Parameters
+    ----------
+    enabled : bool
+        Whether the cron should be active.
+    day_str : str
+        Day of week, e.g. "fri", "mon".
+    time_str : str
+        Time in 24-hour format, e.g. "17:00".
+    """
+    scheduler = _get_scheduler()
+    
+    with _lock:
+        # Always remove existing job first
+        if scheduler.get_job(WEEKLY_REPORT_JOB_ID):
+            scheduler.remove_job(WEEKLY_REPORT_JOB_ID)
+            logger.info("Removed existing weekly report job '%s'.", WEEKLY_REPORT_JOB_ID)
+        
+        if not enabled:
+            logger.info("Weekly report email cron is disabled.")
+            return
+        
+        hour, minute = _parse_time(time_str)
+        
+        from apscheduler.triggers.cron import CronTrigger
+        trigger = CronTrigger(day_of_week=day_str, hour=hour, minute=minute)
+        
+        scheduler.add_job(
+            _weekly_report_job,
+            trigger=trigger,
+            id=WEEKLY_REPORT_JOB_ID,
+            name="Weekly Report Email",
+            replace_existing=True,
+        )
+        logger.info("Scheduled weekly report email: day=%s at %02d:%02d.",
+                   day_str, hour, minute)
+
+
+def get_weekly_report_next_run_time():
+    """Return the next scheduled run time for weekly report, or None if not scheduled."""
+    scheduler = _get_scheduler()
+    job = scheduler.get_job(WEEKLY_REPORT_JOB_ID)
+    if job and job.next_run_time:
+        return job.next_run_time
+    return None
+
+
+def is_weekly_report_job_scheduled():
+    """Return True if the weekly report job is currently scheduled."""
+    scheduler = _get_scheduler()
+    return scheduler.get_job(WEEKLY_REPORT_JOB_ID) is not None

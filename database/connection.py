@@ -1,14 +1,34 @@
-import streamlit as st
+import os
+import ssl
 from contextlib import contextmanager
+
+# === CRITICAL: SSL patches MUST come before ANY other imports ===
+
+# Set environment variables FIRST
+os.environ['PYTHONHTTPSVERIFY'] = '0'
+os.environ['REQUESTS_CA_BUNDLE'] = ''
+os.environ['CURL_CA_BUNDLE'] = ''
+
+# Patch ssl module BEFORE importing anything else
+ssl._create_default_https_context = ssl._create_unverified_context
+
+# Now safe to import other modules
+import streamlit as st
+import urllib3
+
+# Disable SSL verification warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Load secrets
 DB_CONFIG = st.secrets.get("postgres", {})
 
 @st.cache_resource
 def get_supabase_client():
-    """Initialize and return a cached Supabase Client."""
+    """Initialize and return a cached Supabase Client with SSL verification disabled."""
     try:
         from supabase import create_client
+        import httpx
+        
         url = DB_CONFIG.get("SUPABASE_URL")
         key = DB_CONFIG.get("SUPABASE_ANON_KEY")
         if not url or not key:
@@ -22,9 +42,34 @@ def get_supabase_client():
             3. Paste your `[postgres]` configuration there.
             """)
             return None
-        return create_client(url, key)
+        
+        # Create the Supabase client normally
+        client = create_client(url, key)
+        
+        # Now patch its internal httpx client to disable SSL verification
+        try:
+            # The Supabase client has a postgrest attribute with a session (httpx.Client)
+            if hasattr(client, 'postgrest') and hasattr(client.postgrest, 'session'):
+                session = client.postgrest.session
+                if isinstance(session, httpx.Client):
+                    # Create a new transport that doesn't verify SSL
+                    transport = httpx.HTTPTransport(verify=False)
+                    # Replace both the sync and async transports
+                    session._transport_for_url = lambda url: transport
+                    session._mounts['https://'] = transport
+                    session._mounts['http://'] = httpx.HTTPTransport(verify=False)
+        except Exception as e:
+            # If patching fails, continue anyway - the global SSL patch might still work
+            print(f"Warning: Could not patch httpx transport: {e}")
+        
+        return client
     except ImportError:
         st.error("Supabase library not installed. Please run: pip install supabase")
+        return None
+    except Exception as e:
+        st.error(f"Failed to connect to Supabase: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 # Placeholder functions to maintain compatibility during migration

@@ -57,9 +57,10 @@ PIE_COLORS = [
 # Maximum slices per single pie chart before splitting into multiple charts
 PIE_MAX_SLICES_PER_CHART = 20
 
-# Outside labels configuration: only label top 8 projects with at least 2% duration
-PIE_LABEL_TOP_N = 8
-PIE_LABEL_MIN_PCT = 2.0  # Projects below 2% or below top 8 don't get outside labels
+# Outside labels configuration: only label top 5-6 projects with at least 3% duration
+# Reduced from 8 to 6 to prevent overlap with longer project code labels
+PIE_LABEL_TOP_N = 6
+PIE_LABEL_MIN_PCT = 3.0  # Projects below 3% or below top 6 don't get outside labels
 
 
 def get_status_color_hex(status_str: str) -> str:
@@ -304,7 +305,7 @@ def format_pie_slice_label_simple(
     project_name: str,
     days: float,
     initials_str: str = "",
-    wrap_width: int = 28,
+    wrap_width: int = 24,
     html_mode: bool = True
 ) -> str:
     """
@@ -312,6 +313,7 @@ def format_pie_slice_label_simple(
     Format: "<b>Project Name [Initials]</b><br>Xd"
     Avoids duplicate initials if the name already contains them.
     Metadata (dates, status, %) are shown only in the hover tooltip.
+    Reduced wrap_width default from 28 to 24 to minimize label overlap with project codes.
     """
     import html as _html
     display_title = clean_project_name_and_initials(project_name, initials_str)
@@ -385,7 +387,7 @@ def _create_pie_plotly_fig(pie_df, total_pie_days: float, chart_index: int = 0, 
             if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
                 text_list.append(format_pie_slice_label_simple(
                     display_name, d,
-                    str(row.get('initials', '')), wrap_width=22, html_mode=True
+                    str(row.get('initials', '')), wrap_width=20, html_mode=True
                 ))
             else:
                 text_list.append("")
@@ -410,8 +412,8 @@ def _create_pie_plotly_fig(pie_df, total_pie_days: float, chart_index: int = 0, 
         text=text_list,
         textinfo='text',
         textposition='outside',
-        textfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
-        outsidetextfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+        textfont=dict(size=9, color='#1e293b', family='Inter, Arial, sans-serif'),
+        outsidetextfont=dict(size=9, color='#1e293b', family='Inter, Arial, sans-serif'),
         hovertemplate=(
             '<b>%{label}</b><br>'
             '%{customdata[0]} (%{customdata[1]})<br>'
@@ -423,8 +425,8 @@ def _create_pie_plotly_fig(pie_df, total_pie_days: float, chart_index: int = 0, 
         showlegend=False,
         sort=False,
         direction='clockwise',
-        rotation=0,
-        domain=dict(x=[0.18, 0.82], y=[0.10, 0.88]),
+        rotation=90,
+        domain=dict(x=[0.20, 0.80], y=[0.12, 0.88]),
     ))
     fig.update_layout(
         title=dict(
@@ -479,7 +481,7 @@ def _build_rl_pie_drawing(pie_df, total_pie_days: float, pw: float, drawing_h: f
         if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
             pie_labels.append(format_pie_slice_label_simple(
                 display_name, d,
-                str(row.get('initials', '')), wrap_width=18, html_mode=False
+                str(row.get('initials', '')), wrap_width=16, html_mode=False
             ))
         else:
             pie_labels.append("")
@@ -489,8 +491,8 @@ def _build_rl_pie_drawing(pie_df, total_pie_days: float, pw: float, drawing_h: f
         pie_chart.slices[idx].fillColor = pie_palette_rl[idx % len(pie_palette_rl)]
         pie_chart.slices[idx].strokeColor = colors.white
         pie_chart.slices[idx].strokeWidth = 1.5
-        pie_chart.slices[idx].labelRadius = 1.30
-        pie_chart.slices[idx].fontSize = 8.0
+        pie_chart.slices[idx].labelRadius = 1.35
+        pie_chart.slices[idx].fontSize = 7.5
     dwg.add(pie_chart)
     return dwg
 
@@ -764,9 +766,11 @@ def _pdf_add_pie_pages(story, pie_df, total_pie_days, pw, ph, title_style, sub_s
             else:
                 export_fig = _create_pie_plotly_fig(pie_df, total_pie_days, 0, 1)
             export_fig.update_layout(title=dict(text=''), shapes=[],
-                                     margin=dict(l=30, r=30, t=25, b=40),
+                                     margin=dict(l=40, r=40, t=30, b=45),
                                      height=600, paper_bgcolor='white', plot_bgcolor='white')
-            export_fig.update_traces(domain=dict(x=[0.18, 0.82], y=[0.10, 0.88]))
+            export_fig.update_traces(domain=dict(x=[0.20, 0.80], y=[0.12, 0.88]),
+                                    textfont=dict(size=9),
+                                    outsidetextfont=dict(size=9))
             img_bytes = export_fig.to_image(format='png', scale=2, width=1050, height=600)
         except Exception:
             img_bytes = None

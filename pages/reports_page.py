@@ -261,10 +261,39 @@ def render_reports_page(user):
 
             # Only display the charts section if there is actual data to plot
             if not chart_data.empty and chart_data['hours'].sum() > 0:
-                chart_hdr_col, chart_exp_col = st.columns([7, 3])
+                chart_hdr_col, chart_btn_col = st.columns([7, 3])
                 with chart_hdr_col:
                     st.write("### 📈 Charts & Analytics")
-                # chart_exp_col used later after charts are built
+                
+                # Add Send Report Email Button to the header row (Admin only)
+                if user.get("role") == "admin":
+                    with chart_btn_col:
+                        if st.button("📧 Send Email Report", key="send_report_email_btn", use_container_width=True, type="secondary"):
+                            from database.queries import get_report_email_settings
+                            from services.report_email_service import generate_and_send_weekly_report
+                            
+                            # Check recipients
+                            settings = get_report_email_settings()
+                            recipients = settings.get('recipients', [])
+                            
+                            if not recipients:
+                                st.error("❌ No recipients configured. Please add recipients in Settings → Send Report Settings")
+                            else:
+                                with st.spinner(f"Generating report and sending to {len(recipients)} recipient(s)..."):
+                                    # Send email (the function handles PDF generation internally)
+                                    success, message = generate_and_send_weekly_report(
+                                        recipients=recipients,
+                                        trigger_type='manual',
+                                        sent_by=user.get('employee_id', 'admin'),
+                                        start_date=r_start,
+                                        end_date=r_end
+                                    )
+                                
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    st.balloons()
+                                else:
+                                    st.error(f"❌ {message}")
 
                 # Display charts stacked vertically for maximum readability
                 # ── Shared Project Data for Charts ────────────────────────────
@@ -328,8 +357,9 @@ def render_reports_page(user):
                     meta_txt = build_project_metadata_text(
                         p['days'], pct, p['initials'], p['start_str'], p['end_str'], p['status']
                     )
-                    # Outside label only for top 8 projects with duration >= PIE_LABEL_MIN_PCT (2.0%);
-                    # Projects below top 8 or below 2% don't display titles/labels to prevent clutter.
+                    # Outside label only for top 6 projects with duration >= PIE_LABEL_MIN_PCT (3.0%);
+                    # Projects below top 6 or below 3% don't display titles/labels to prevent clutter and overlap.
+                    # Reduced from top 8/2% to top 6/3% to handle longer labels with project codes.
                     # clean_bar_project_title strips [bracketed] content from project names.
                     clean_name = clean_bar_project_title(p['project_name'])
                     # Format display name with project code
@@ -337,7 +367,7 @@ def render_reports_page(user):
                     if idx < PIE_LABEL_TOP_N and pct >= PIE_LABEL_MIN_PCT:
                         outside_lbl = format_pie_slice_label_simple(
                             display_name_with_code, p['days'], p['initials'],
-                            wrap_width=28, html_mode=True
+                            wrap_width=24, html_mode=True
                         )
                     else:
                         outside_lbl = ""
@@ -390,8 +420,8 @@ def render_reports_page(user):
                     text=pie_df['outside_label'],
                     textinfo='text',
                     textposition='outside',
-                    textfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
-                    outsidetextfont=dict(size=10.5, color='#1e293b', family='Inter, Arial, sans-serif'),
+                    textfont=dict(size=10, color='#1e293b', family='Inter, Arial, sans-serif'),
+                    outsidetextfont=dict(size=10, color='#1e293b', family='Inter, Arial, sans-serif'),
                     hovertemplate=(
                         '<b>[%{customdata[0]}] %{label}</b><br>'
                         '%{customdata[1]} (%{customdata[2]})<br>'
@@ -403,8 +433,8 @@ def render_reports_page(user):
                     showlegend=False,
                     sort=False,
                     direction='clockwise',
-                    rotation=210,
-                    domain=dict(x=[0.12, 0.88], y=[0.04, 0.84]),
+                    rotation=90,
+                    domain=dict(x=[0.15, 0.85], y=[0.08, 0.88]),
                 ))
                 fig_pie.update_layout(
                     title=dict(text=''),
@@ -429,7 +459,7 @@ def render_reports_page(user):
                 try:
                     pie_fname = f"pie_chart_{r_start.strftime('%d%m%Y')}_{r_end.strftime('%d%m%Y')}.pdf"
                     pie_pdf_bytes = build_pie_pdf_report(r_start, r_end, pie_df, total_project_days, fig=fig_pie)
-                    _pie_btn_col, _ = st.columns([2, 4])
+                    _pie_btn_col, _, _ = st.columns([2, 2, 2])
                     with _pie_btn_col:
                         st.download_button(
                             label="🥧 Pie Chart — Export PDF",
@@ -439,6 +469,7 @@ def render_reports_page(user):
                             key="report_pie_pdf_btn",
                             use_container_width=True,
                         )
+                
                 except Exception as _pie_pdf_err:
                     st.error(f"⚠️ Pie PDF failed: {_pie_pdf_err}")
 

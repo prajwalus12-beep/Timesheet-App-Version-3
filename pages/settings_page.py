@@ -16,10 +16,11 @@ def render_settings_page(user=None):
         user = st.session_state.get('user', {})
         
     st.subheader("System Settings", divider="blue")
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗓️ Weekly Lockout Schedule", 
         "👥 Employee Permissions", 
         "📧 Timesheet Reminder Settings",
+        "📊 Send Report Settings",
         "🏖️ Holiday Management"
     ])
     
@@ -314,6 +315,223 @@ def render_settings_page(user=None):
         )
 
     with tab4:
+        # --- Send Report Settings (Admin-only) ---
+        from database.queries import get_report_email_settings, update_report_email_settings
+        from services.email_service import send_test_report_email
+        import re
+        
+        st.write("### 📊 Send Report Settings")
+        st.caption("Configure automated weekly timesheet report emails with charts and analytics.")
+        
+        # Load current settings
+        report_settings = get_report_email_settings()
+        current_enabled = report_settings.get('enabled', False)
+        current_recipients = report_settings.get('recipients', [])
+        current_day = report_settings.get('day', 'fri')
+        current_time_str = report_settings.get('time', '17:00')
+        current_timezone = report_settings.get('timezone', 'UTC')
+        last_sent = report_settings.get('last_sent', '')
+        
+        # Day mapping
+        REPORT_DAY_MAP = {
+            'mon': 'Monday', 'tue': 'Tuesday', 'wed': 'Wednesday',
+            'thu': 'Thursday', 'fri': 'Friday', 'sat': 'Saturday', 'sun': 'Sunday'
+        }
+        INV_REPORT_DAY_MAP = {v: k for k, v in REPORT_DAY_MAP.items()}
+        
+        try:
+            parts = current_time_str.strip().split(':')
+            current_time = datetime.time(int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError):
+            current_time = datetime.time(17, 0)
+        
+        with st.container(border=True):
+            # Enable/Disable toggle
+            new_enabled = st.toggle(
+                "Enable Automatic Weekly Reports",
+                value=current_enabled,
+                key="report_email_enabled_toggle",
+                help="When enabled, weekly reports are automatically sent on the selected day at the configured time."
+            )
+            
+            st.markdown("---")
+            
+            # Email Recipients
+            st.markdown("**📧 Email Recipients**")
+            st.caption("Add one or more email addresses to receive weekly reports. Press Enter after each email.")
+            
+            # Display current recipients
+            if current_recipients:
+                st.markdown(f"**Current Recipients ({len(current_recipients)}):**")
+                for idx, email in enumerate(current_recipients):
+                    col_e, col_x = st.columns([5, 1])
+                    with col_e:
+                        st.code(email, language=None)
+                    with col_x:
+                        if st.button("🗑️", key=f"remove_recipient_{idx}", help="Remove this recipient"):
+                            current_recipients.pop(idx)
+                            update_report_email_settings(recipients=current_recipients)
+                            st.toast(f"✅ Removed {email}", icon="🗑️")
+                            st.rerun()
+            else:
+                st.info("ℹ️ No recipients configured. Add email addresses below.")
+            
+            # Add new recipient
+            new_email = st.text_input(
+                "Add Recipient Email",
+                placeholder="email@example.com",
+                key="new_recipient_email_input",
+                help="Enter a valid email address and click Add"
+            )
+            
+            if st.button("➕ Add Recipient", key="add_recipient_btn"):
+                if not new_email:
+                    st.error("❌ Please enter an email address")
+                elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', new_email):
+                    st.error("❌ Please enter a valid email address")
+                elif new_email in current_recipients:
+                    st.warning("⚠️ This email is already in the recipient list")
+                else:
+                    current_recipients.append(new_email)
+                    update_report_email_settings(recipients=current_recipients)
+                    st.toast(f"✅ Added {new_email}", icon="📧")
+                    st.rerun()
+            
+            st.markdown("---")
+            
+            # Schedule settings
+            st.markdown("**📅 Report Schedule**")
+            col_day, col_time, col_tz = st.columns(3)
+            
+            with col_day:
+                current_day_label = REPORT_DAY_MAP.get(current_day, 'Friday')
+                new_day_label = st.selectbox(
+                    "Day of Week",
+                    options=list(REPORT_DAY_MAP.values()),
+                    index=list(REPORT_DAY_MAP.values()).index(current_day_label),
+                    key="report_day_select"
+                )
+            
+            with col_time:
+                new_time = st.time_input(
+                    "Time",
+                    value=current_time,
+                    key="report_time_input",
+                    help="Time when the report is automatically sent"
+                )
+            
+            with col_tz:
+                # Common timezones
+                timezones = ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 
+                            'Europe/London', 'Europe/Paris', 'Asia/Kolkata', 'Asia/Tokyo', 
+                            'Australia/Sydney']
+                try:
+                    tz_index = timezones.index(current_timezone)
+                except ValueError:
+                    tz_index = 0
+                    
+                new_timezone = st.selectbox(
+                    "Time Zone",
+                    options=timezones,
+                    index=tz_index,
+                    key="report_timezone_select"
+                )
+            
+            st.markdown("---")
+            
+            # Status display
+            status_col1, status_col2 = st.columns(2)
+            with status_col1:
+                if new_enabled:
+                    st.markdown("**Status:** :green[✅ Enabled]")
+                else:
+                    st.markdown("**Status:** :red[❌ Disabled]")
+            
+            with status_col2:
+                if last_sent:
+                    try:
+                        last_sent_dt = datetime.datetime.fromisoformat(last_sent)
+                        st.markdown(f"**Last sent:** {last_sent_dt.strftime('%d-%m-%Y %H:%M')}")
+                    except Exception:
+                        st.markdown("**Last sent:** —")
+                else:
+                    st.markdown("**Last sent:** Never")
+            
+            # Next run time
+            try:
+                from services.scheduler_service import get_weekly_report_next_run_time
+                next_run = get_weekly_report_next_run_time()
+                if next_run:
+                    st.markdown(f"**Next scheduled run:** {next_run.strftime('%A, %d-%m-%Y at %H:%M')}")
+                else:
+                    st.markdown("**Next scheduled run:** —")
+            except Exception:
+                pass
+            
+            st.markdown("---")
+            
+            # Action buttons
+            btn_col1, btn_col2 = st.columns(2)
+            
+            with btn_col1:
+                if st.button("💾 Save Settings", key="save_report_settings_btn", type="primary", use_container_width=True):
+                    if new_enabled and not current_recipients:
+                        st.error("❌ Please add at least one recipient email address before enabling automatic reports")
+                        st.stop()
+                    
+                    new_time_str = new_time.strftime('%H:%M')
+                    new_day = INV_REPORT_DAY_MAP[new_day_label]
+                    
+                    # Save settings
+                    success, msg = update_report_email_settings(
+                        enabled=new_enabled,
+                        recipients=current_recipients,
+                        day=new_day,
+                        time=new_time_str,
+                        timezone=new_timezone
+                    )
+                    
+                    if success:
+                        # Update scheduler
+                        try:
+                            from services.scheduler_service import update_weekly_report_schedule
+                            update_weekly_report_schedule(new_enabled, new_day, new_time_str)
+                        except Exception as sched_err:
+                            st.warning(f"⚠️ Settings saved but scheduler update failed: {sched_err}")
+                        
+                        if new_enabled:
+                            st.toast(f"✅ Report settings saved! Reports will be sent every {new_day_label} at {new_time_str}", icon="📊")
+                        else:
+                            st.toast("✅ Report settings saved! (Currently disabled)", icon="📊")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to save settings: {msg}")
+            
+            with btn_col2:
+                if st.button("📧 Send Test Email", key="send_test_report_email_btn", use_container_width=True, disabled=not current_recipients):
+                    if current_recipients:
+                        test_recipient = current_recipients[0]
+                        with st.spinner(f"Sending test email to {test_recipient}..."):
+                            success, msg = send_test_report_email(test_recipient)
+                        if success:
+                            st.success(f"✅ {msg}")
+                        else:
+                            st.error(f"❌ {msg}")
+                    else:
+                        st.error("❌ Please add at least one recipient first")
+        
+        st.markdown("---")
+        st.info(
+            "**📌 Report Content**\n\n"
+            "The weekly report includes:\n"
+            "- Summary of timesheet submissions and employee statistics\n"
+            "- Project breakdown with codes and names\n"
+            "- Combined PDF with both pie chart and bar chart\n"
+            "- Reporting period and effort metrics (hours/days)\n\n"
+            "You can also send reports manually from the Report page."
+        )
+
+    with tab5:
         # --- Holiday Management (Admin-only) ---
         st.write("### 🏖️ Holiday Management")
         st.caption("Configure company-wide holidays applicable to all employees. Add manually or import via Excel/CSV.")

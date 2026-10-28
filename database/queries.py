@@ -1,4 +1,6 @@
 import pandas as pd
+import json
+import datetime
 from database.connection import get_supabase_client
 from services.auth_service import hash_password, encrypt_data, decrypt_data
 
@@ -2143,3 +2145,118 @@ def has_active_holiday_for_date(emp_id, date):
     except Exception:
         return False, None
 
+
+
+# ============================================================================
+# REPORT EMAIL SETTINGS & HISTORY
+# ============================================================================
+
+def get_report_email_settings():
+    """Retrieve all report email configuration settings."""
+    return {
+        'enabled': get_app_setting('report_email_enabled', 'false').lower() == 'true',
+        'recipients': json.loads(get_app_setting('report_email_recipients', '[]')),
+        'day': get_app_setting('report_email_day', 'fri'),
+        'time': get_app_setting('report_email_time', '17:00'),
+        'timezone': get_app_setting('report_email_timezone', 'UTC'),
+        'last_sent': get_app_setting('report_email_last_sent', ''),
+    }
+
+def update_report_email_settings(enabled=None, recipients=None, day=None, time=None, timezone=None):
+    """Update report email configuration settings."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return False, "Database connection failed"
+    
+    try:
+        if enabled is not None:
+            set_app_setting('report_email_enabled', 'true' if enabled else 'false')
+        if recipients is not None:
+            set_app_setting('report_email_recipients', json.dumps(recipients))
+        if day is not None:
+            set_app_setting('report_email_day', day)
+        if time is not None:
+            set_app_setting('report_email_time', time)
+        if timezone is not None:
+            set_app_setting('report_email_timezone', timezone)
+        return True, "Settings updated successfully"
+    except Exception as e:
+        return False, str(e)
+
+def create_report_email_log(recipient_emails, period_start, period_end, trigger_type='manual', 
+                            sent_by=None, email_subject='', total_employees=0, total_entries=0,
+                            total_projects=0, total_days=0.0):
+    """Create a new report email history record. Returns log ID."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    
+    try:
+        data = {
+            'recipient_emails': recipient_emails if isinstance(recipient_emails, str) else ','.join(recipient_emails),
+            'report_period_start': period_start.isoformat() if hasattr(period_start, 'isoformat') else period_start,
+            'report_period_end': period_end.isoformat() if hasattr(period_end, 'isoformat') else period_end,
+            'status': 0,  # pending
+            'trigger_type': trigger_type,
+            'sent_by': sent_by,
+            'email_subject': email_subject,
+            'total_employees': total_employees,
+            'total_entries': total_entries,
+            'total_projects': total_projects,
+            'total_days': float(total_days),
+        }
+        res = supabase.table('report_email_history').insert(data).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]['id']
+        return None
+    except Exception as e:
+        print(f"Error creating report email log: {e}")
+        return None
+
+def update_report_email_log(log_id, status, error_message=None):
+    """Update report email history record status."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+    
+    try:
+        data = {'status': status}
+        if error_message:
+            data['error_message'] = error_message
+        supabase.table('report_email_history').update(data).eq('id', log_id).execute()
+        
+        # Update last_sent timestamp if successful
+        if status == 1:
+            set_app_setting('report_email_last_sent', datetime.datetime.now().isoformat())
+        return True
+    except Exception as e:
+        print(f"Error updating report email log: {e}")
+        return False
+
+def get_report_email_history(limit=50):
+    """Retrieve recent report email history."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return pd.DataFrame()
+    
+    try:
+        res = supabase.table('report_email_history').select('*').order('sent_at', desc=True).limit(limit).execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+        return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+def get_last_report_email_status():
+    """Get the most recent report email delivery status."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    
+    try:
+        res = supabase.table('report_email_history').select('*').order('sent_at', desc=True).limit(1).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+        return None
+    except Exception:
+        return None
