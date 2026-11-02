@@ -1,0 +1,62 @@
+name: Automated Timesheet Email Reports
+
+on:
+  schedule:
+    # Run every Monday at 12:00 UTC (adjust timezone as needed)
+    # For IST (UTC+5:30): Use '30 6 * * 1' for Monday 12:00 IST
+    # For EST (UTC-5): Use '0 17 * * 1' for Monday 12:00 EST
+    # For PST (UTC-8): Use '0 20 * * 1' for Monday 12:00 PST
+    - cron: '0 12 * * 1'
+  
+  # Allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Report type to send'
+        required: false
+        default: 'weekly-report'
+        type: choice
+        options:
+          - weekly-report
+
+jobs:
+  send-email-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run automated scheduler
+        env:
+          # Supabase credentials
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          
+          # SMTP credentials
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM_EMAIL: ${{ secrets.SMTP_FROM_EMAIL }}
+        run: |
+          python services/automated_scheduler.py weekly-report
+      
+      - name: Upload logs (if any)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: email-logs
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore

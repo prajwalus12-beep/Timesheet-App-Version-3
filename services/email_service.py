@@ -209,7 +209,7 @@ def send_reminder_email(employee_id, recipient_email, employee_name, projects):
 
 
 
-def send_weekly_report_email(recipients, report_data, bar_pdf_bytes, trigger_type='manual', sent_by=None):
+def send_weekly_report_email(recipients, report_data, bar_pdf_bytes, trigger_type='manual', sent_by=None, date_range_filter='custom'):
     """
     Send weekly timesheet report email with bar chart PDF attachment.
     
@@ -225,6 +225,8 @@ def send_weekly_report_email(recipients, report_data, bar_pdf_bytes, trigger_typ
         'manual' or 'scheduled'
     sent_by : str
         Employee ID or 'system'
+    date_range_filter : str
+        Type of date range filter used (for reference)
         
     Returns:
     --------

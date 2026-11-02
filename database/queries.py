@@ -2160,10 +2160,14 @@ def get_report_email_settings():
         'time': get_app_setting('report_email_time', '17:00'),
         'timezone': get_app_setting('report_email_timezone', 'UTC'),
         'last_sent': get_app_setting('report_email_last_sent', ''),
+        'date_range_filter': get_app_setting('report_email_date_range_filter', 'last_week'),
+        'custom_start_date': get_app_setting('report_email_custom_start_date', ''),
+        'custom_end_date': get_app_setting('report_email_custom_end_date', ''),
     }
 
-def update_report_email_settings(enabled=None, recipients=None, day=None, time=None, timezone=None):
-    """Update report email configuration settings."""
+def update_report_email_settings(enabled=None, recipients=None, day=None, time=None, timezone=None,
+                                 date_range_filter=None, custom_start_date=None, custom_end_date=None):
+    """Update report email configuration settings including date range filters."""
     supabase = get_supabase_client()
     if not supabase:
         return False, "Database connection failed"
@@ -2179,6 +2183,12 @@ def update_report_email_settings(enabled=None, recipients=None, day=None, time=N
             set_app_setting('report_email_time', time)
         if timezone is not None:
             set_app_setting('report_email_timezone', timezone)
+        if date_range_filter is not None:
+            set_app_setting('report_email_date_range_filter', date_range_filter)
+        if custom_start_date is not None:
+            set_app_setting('report_email_custom_start_date', custom_start_date.isoformat() if hasattr(custom_start_date, 'isoformat') else str(custom_start_date))
+        if custom_end_date is not None:
+            set_app_setting('report_email_custom_end_date', custom_end_date.isoformat() if hasattr(custom_end_date, 'isoformat') else str(custom_end_date))
         return True, "Settings updated successfully"
     except Exception as e:
         return False, str(e)

@@ -4,8 +4,11 @@ Report Email Service
 Handles generation and delivery of weekly timesheet reports.
 """
 import datetime
+import logging
 import pandas as pd
 from utils.date_helpers import get_curr_cycle_dates
+
+logger = logging.getLogger(__name__)
 from utils.chart_helpers import (
     build_pie_pdf_report, 
     build_bar_pdf_report,
@@ -210,10 +213,11 @@ def generate_report_data(start_date, end_date):
 
 
 def generate_and_send_weekly_report(recipients, trigger_type='manual', sent_by=None, 
-                                    start_date=None, end_date=None):
+                                    start_date=None, end_date=None, date_range_filter=None,
+                                    custom_start_date=None, custom_end_date=None):
     """
-    Generate weekly timesheet report and send to configured recipients.
-    Creates a single PDF file for the bar chart.
+    Generate timesheet report and send to configured recipients.
+    Supports multiple date range filters for flexible reporting.
     
     Parameters:
     -----------
@@ -224,9 +228,16 @@ def generate_and_send_weekly_report(recipients, trigger_type='manual', sent_by=N
     sent_by : str
         Employee ID or 'system'
     start_date : date, optional
-        Start of reporting period (defaults to current week Monday)
+        Start of reporting period (legacy parameter, use date_range_filter instead)
     end_date : date, optional
-        End of reporting period (defaults to current week Sunday)
+        End of reporting period (legacy parameter, use date_range_filter instead)
+    date_range_filter : str, optional
+        Type of date range: 'this_week', 'last_week', 'current_cycle', 'previous_cycle', 'custom'
+        Defaults to 'last_week' for scheduled reports, 'this_week' for manual
+    custom_start_date : date, optional
+        Start date for custom range (required if date_range_filter is 'custom')
+    custom_end_date : date, optional
+        End date for custom range (required if date_range_filter is 'custom')
         
     Returns:
     --------
@@ -234,17 +245,34 @@ def generate_and_send_weekly_report(recipients, trigger_type='manual', sent_by=N
     """
     try:
         from utils.chart_helpers import build_bar_pdf_report
+        from utils.date_helpers import calculate_report_date_range, get_date_range_display_name
         
         # Determine reporting period
-        if start_date is None or end_date is None:
+        if date_range_filter:
+            # Use new date range filter approach
+            start_date, end_date = calculate_report_date_range(
+                date_range_filter,
+                custom_start=custom_start_date,
+                custom_end=custom_end_date
+            )
+            range_name = get_date_range_display_name(date_range_filter, custom_start_date, custom_end_date)
+        elif start_date is None or end_date is None:
+            # Legacy behavior: use report week dates
             start_date, end_date = get_report_week_dates()
+            range_name = "This Week"
+        else:
+            range_name = "Custom"
+        
+        logger.info(f"Generating report for range: {range_name} ({start_date} to {end_date})")
         
         # Generate report data and charts
         report_data, pie_df, total_pie_days, bar_df = generate_report_data(start_date, end_date)
         
         # Check if there's data to report
         if bar_df.empty:
-            return False, "No timesheet data available for the selected period"
+            msg = f"No timesheet data available for {range_name}"
+            logger.warning(msg)
+            return False, msg
         
         # Generate bar chart PDF only
         bar_pdf_bytes = build_bar_pdf_report(
@@ -259,7 +287,8 @@ def generate_and_send_weekly_report(recipients, trigger_type='manual', sent_by=N
             report_data=report_data,
             bar_pdf_bytes=bar_pdf_bytes,
             trigger_type=trigger_type,
-            sent_by=sent_by
+            sent_by=sent_by,
+            date_range_filter=date_range_filter or 'custom'
         )
         
         return success, message
@@ -267,5 +296,5 @@ def generate_and_send_weekly_report(recipients, trigger_type='manual', sent_by=N
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"Error generating/sending weekly report: {error_details}")
+        logger.error(f"Error generating/sending weekly report: {error_details}")
         return False, f"Error: {str(e)}"

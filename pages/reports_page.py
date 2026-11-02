@@ -272,22 +272,59 @@ def render_reports_page(user):
                             from database.queries import get_report_email_settings
                             from services.report_email_service import generate_and_send_weekly_report
                             
-                            # Check recipients
+                            # Check recipients and get date range filter settings
                             settings = get_report_email_settings()
                             recipients = settings.get('recipients', [])
+                            date_range_filter = settings.get('date_range_filter', None)
+                            custom_start = settings.get('custom_start_date', '')
+                            custom_end = settings.get('custom_end_date', '')
+                            
+                            # Parse custom dates if present
+                            custom_start_date = None
+                            custom_end_date = None
+                            if custom_start:
+                                try:
+                                    custom_start_date = datetime.datetime.strptime(custom_start, '%Y-%m-%d').date()
+                                except ValueError:
+                                    pass
+                            if custom_end:
+                                try:
+                                    custom_end_date = datetime.datetime.strptime(custom_end, '%Y-%m-%d').date()
+                                except ValueError:
+                                    pass
                             
                             if not recipients:
-                                st.error("❌ No recipients configured. Please add recipients in Settings → Send Report Settings")
+                                st.error("❌ No recipients configured. Please add recipients in Settings → Automatic Report Settings")
                             else:
                                 with st.spinner(f"Generating report and sending to {len(recipients)} recipient(s)..."):
-                                    # Send email (the function handles PDF generation internally)
-                                    success, message = generate_and_send_weekly_report(
-                                        recipients=recipients,
-                                        trigger_type='manual',
-                                        sent_by=user.get('employee_id', 'admin'),
-                                        start_date=r_start,
-                                        end_date=r_end
-                                    )
+                                    # Use configured date range filter if set, otherwise use current UI selection
+                                    if date_range_filter and date_range_filter != 'custom':
+                                        # Use configured date range filter (e.g., "last_week", "this_week", etc.)
+                                        success, message = generate_and_send_weekly_report(
+                                            recipients=recipients,
+                                            trigger_type='manual',
+                                            sent_by=user.get('employee_id', 'admin'),
+                                            date_range_filter=date_range_filter
+                                        )
+                                    elif date_range_filter == 'custom' and custom_start_date and custom_end_date:
+                                        # Use custom date range from settings
+                                        success, message = generate_and_send_weekly_report(
+                                            recipients=recipients,
+                                            trigger_type='manual',
+                                            sent_by=user.get('employee_id', 'admin'),
+                                            date_range_filter='custom',
+                                            custom_start_date=custom_start_date,
+                                            custom_end_date=custom_end_date
+                                        )
+                                    else:
+                                        # Fallback: use current UI filter dates (legacy behavior)
+                                        success, message = generate_and_send_weekly_report(
+                                            recipients=recipients,
+                                            trigger_type='manual',
+                                            sent_by=user.get('employee_id', 'admin'),
+                                            start_date=r_start,
+                                            end_date=r_end
+                                        )
                                 
                                 if success:
                                     st.success(f"✅ {message}")
