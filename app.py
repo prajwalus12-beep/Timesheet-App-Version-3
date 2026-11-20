@@ -11,6 +11,8 @@ from pages.import_page import render_import_page
 from pages.project_update_page_v2 import render_project_update_page_v2
 from pages.add_project_page import render_add_project_page
 from pages.settings_page import render_settings_page
+from pages.help_page import render_help_page
+from components.help_banner import render_help_banner
 from config.constants import PAGE_CONFIG
 
 # 1. Page Config
@@ -66,6 +68,9 @@ else:
 
     # Page Content
     page = st.session_state["page"]
+    if page != "Help":
+        render_help_banner(page, user)
+
     if page == "Timesheet Entries": render_timesheet_page(user)
     elif page == "Projects": render_projects_page()
     elif page == "Employees": render_employees_page(user)
@@ -79,3 +84,4 @@ else:
         else:
             st.error("⛔ Access Denied: You do not have permission to access the Add Project page.")
     elif page == "Settings": render_settings_page(user)
+    elif page == "Help": render_help_page(user)

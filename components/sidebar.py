@@ -136,12 +136,13 @@ def render_sidebar(user):
         can_add_project = is_admin or get_employee_add_project_access(user.get("employee_id"))
 
         if is_admin:
-            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings"]
+            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings", "❓  Help"]
         else:
             # All employees can see Project Update (edit vs view-only controlled by access flag)
             options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2"]
             if can_add_project:
                 options.append("➕  Add Project")
+            options.append("❓  Help")
 
         page_map = {
             "📋  Timesheet": "Timesheet Entries",
@@ -152,17 +153,22 @@ def render_sidebar(user):
             "📊  Report": "Reports",
             "📥  Import": "Import Data",
             "⚙️  Settings": "Settings",
+            "❓  Help": "Help",
         }
         reverse_map = {v: k for k, v in page_map.items()}
 
         current_page = st.session_state.get("page", "Timesheet Entries")
-        default_idx = options.index(reverse_map.get(current_page, options[0])) if reverse_map.get(current_page) in options else 0
+        target_label = reverse_map.get(current_page, options[0])
+        default_idx = options.index(target_label) if target_label in options else 0
+
+        # Dynamic key based on nav_version allows programmatic navigation without state mutation exceptions
+        nav_key = f"sidebar_nav_radio_{st.session_state.get('nav_version', 0)}"
 
         selected = st.radio(
             "Navigation",
             options,
             index=default_idx,
-            key="sidebar_nav_radio",
+            key=nav_key,
             label_visibility="collapsed",
         )
 
