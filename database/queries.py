@@ -643,14 +643,22 @@ def import_projects(df):
                 continue
 
             proj_name = _get_val(row, 'project_name', '')
+            # FIX BUG 1: Strip trailing whitespace/tabs from project name before encrypting
+            proj_name_clean = str(proj_name).strip() if proj_name else ''
             status_val = _get_val(row, 'status', 'In progress')
+            # FIX BUG 3: Filter out invalid status placeholder values (e.g. '_')
+            valid_statuses = {'Not started', 'Awaiting Info', 'At Beta', 'In progress', 'In Progress',
+                              'In testing', 'Complete', 'To be deployed', 'Duplicate - Closed',
+                              'Ongoing', 'On hold', 'Wireframe', 'Leave', 'Holiday'}
+            if str(status_val).strip() not in valid_statuses:
+                status_val = 'In progress'
             priority_val = _parse_priority(_get_val(row, 'priority'))
             lead_val = _parse_lead_engineer(_get_val(row, 'lead_engineer'))
             trello_val = _get_val(row, 'trello_link')
 
             record = {
                 "project_code": code,
-                "project_name": encrypt_data(str(proj_name)),
+                "project_name": encrypt_data(proj_name_clean),
                 "status": str(status_val) if status_val else 'In progress',
                 "priority": priority_val,
                 "lead_engineer": lead_val,
@@ -1272,14 +1280,27 @@ def import_project_updates(df):
         to_update = []
         new_count = 0
         updated_count = 0
-        preserved_count = 0
+        fk_skipped = 0
         cleared_count = 0
+
+        # Valid status values — used to filter out placeholder/invalid values like '_'
+        _valid_statuses = {
+            'Not started', 'Awaiting Info', 'At Beta', 'In progress', 'In Progress',
+            'In testing', 'Complete', 'To be deployed', 'Duplicate - Closed',
+            'Ongoing', 'On hold', 'Wireframe'
+        }
+
+        def _parse_status(x):
+            if not pd.notna(x):
+                return 'In progress'
+            s = str(x).strip()
+            return s if s in _valid_statuses else 'In progress'
 
         # Data fields to process: (DB Field, Parser, Default)
         data_fields = [
             ('project_name', lambda x: str(x).strip() if pd.notna(x) else "", ""),
             ('priority', _parse_priority, None),
-            ('status', lambda x: str(x).strip() if pd.notna(x) else 'In progress', 'In progress'),
+            ('status', _parse_status, 'In progress'),
             ('lead_engineer', _parse_lead_engineer, ""),
             ('trello_link', lambda x: str(x).strip() if pd.notna(x) and str(x).strip().lower() not in ('nan', 'none', 'nat', '') else None, None),
             ('start_date', _parse_date_value, None),
@@ -1297,6 +1318,10 @@ def import_project_updates(df):
         ]
 
         for _, row in df.iterrows():
+            # FIX: Use dict-style access with fallback to handle both Series and dict rows
+            def _row_get(col, fallback=''):
+                v = row.get(col)
+                return fallback if v is None or (hasattr(pd, 'isna') and pd.isna(v) if not isinstance(v, str) else False) else v
             code = _normalize_code(row.get('Job No') or row.get('Project Code') or row.get('Job_No') or row.get('Project_Code') or '')
             if not code or code.lower() == 'nan':
                 continue
@@ -1324,22 +1349,26 @@ def import_project_updates(df):
                 existing = existing_map[code]
                 record["id"] = existing["id"]
                 row_changed = False
-                row_preserved = False
-                
+
                 for db_f, parser, default in data_fields:
                     is_mapped = col_mapping.get(db_f) is not None
-                    
+
                     if db_f == 'project_name':
                         imp_val = str(raw_proj).strip() if pd.notna(raw_proj) else default
                     else:
                         excel_f = col_mapping.get(db_f)
                         raw_val = row.get(excel_f) if excel_f else None
-                        imp_val = parser(raw_val) if raw_val is not None else default
-                    
+                        # FIX BUG: pd.NA is not None, so we must check pd.isna() before calling parser
+                        # Otherwise parsers get called with pd.NA causing unexpected behaviour
+                        if raw_val is None or (not isinstance(raw_val, str) and pd.isna(raw_val)):
+                            imp_val = default
+                        else:
+                            imp_val = parser(raw_val)
+
                     flag_col = f"{db_f}_updated"
                     is_updated = existing.get(flag_col, False)
                     db_val = existing.get(db_f)
-                    
+
                     if is_mapped:
                         if _normalize_for_cmp(imp_val) != _normalize_for_cmp(db_val):
                             # Imported data is different, overwrite it and clear flag
@@ -1349,7 +1378,7 @@ def import_project_updates(df):
                             if is_updated:
                                 cleared_count += 1
                         else:
-                            # Imported data matches, ensure flag is cleared
+                            # Imported data matches, clear the manual-updated flag
                             record[db_f] = db_val
                             if is_updated:
                                 record[flag_col] = False
@@ -1358,16 +1387,16 @@ def import_project_updates(df):
                             else:
                                 record[flag_col] = False
                     else:
-                        # Column not in CSV, preserve existing DB value and manual flag
+                        # Column not in sheet — preserve existing DB value and manual flag
                         record[db_f] = db_val
                         record[flag_col] = is_updated
-                
-                if row_changed or row_preserved:
-                    if "project_code_updated" in existing:
-                        record["project_code_updated"] = False
-                    to_update.append(_sanitize_dict(record))
-                    if row_changed: updated_count += 1
-                    if row_preserved: preserved_count += 1
+
+                # Always upsert existing records so flag resets are persisted
+                if "project_code_updated" in existing:
+                    record["project_code_updated"] = False
+                to_update.append(_sanitize_dict(record))
+                if row_changed:
+                    updated_count += 1
             else:
                 # New record: Set all flags to FALSE
                 for db_f, parser, default in data_fields:
@@ -1376,23 +1405,44 @@ def import_project_updates(df):
                     else:
                         excel_f = col_mapping.get(db_f)
                         raw_val = row.get(excel_f) if excel_f else None
-                        imp_val = parser(raw_val) if raw_val is not None else default
-                    
+                        # FIX BUG: pd.NA is not None — guard before calling parser
+                        if raw_val is None or (not isinstance(raw_val, str) and pd.isna(raw_val)):
+                            imp_val = default
+                        else:
+                            imp_val = parser(raw_val)
+
                     record[db_f] = imp_val
                     record[f"{db_f}_updated"] = False
-                
+
                 record["project_code_updated"] = False
                 to_insert.append(_sanitize_dict(record))
                 new_count += 1
 
-        if to_insert:
-            supabase.table('project_reports').insert(to_insert).execute()
+        # FIX BUG: Insert new project_reports records one at a time so a single
+        # FK-violation (project_code not yet in 'project' table) doesn't silently
+        # block ALL new inserts. Each failure is logged but processing continues.
+        fk_skipped = 0
+        insert_errors = []
+        for rec in to_insert:
+            try:
+                supabase.table('project_reports').insert(rec).execute()
+            except Exception as insert_err:
+                err_str = str(insert_err)
+                # Detect FK violations: project_code not in 'project' table
+                if 'foreign key' in err_str.lower() or 'fk_' in err_str.lower() or 'violates' in err_str.lower():
+                    fk_skipped += 1
+                    print(f"FK skip for project {rec.get('project_code')}: {err_str}")
+                else:
+                    insert_errors.append(f"project {rec.get('project_code')}: {err_str}")
+                    print(f"Insert error for project {rec.get('project_code')}: {err_str}")
+        new_count -= fk_skipped  # Adjust count for FK skips
+
         if to_update:
             supabase.table('project_reports').upsert(to_update).execute()
              
         msg = f"Import complete: {new_count} new projects added."
         if updated_count: msg += f" {updated_count} projects updated."
-        if preserved_count: msg += f" {preserved_count} manual edits preserved."
+        if fk_skipped: msg += f" {fk_skipped} skipped (project not found in Projects table — import the project first)."
         if cleared_count: msg += f" {cleared_count} highlights cleared."
         
         return True, msg

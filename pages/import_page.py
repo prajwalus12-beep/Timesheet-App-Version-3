@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import traceback
 from database.queries import import_employees, import_projects, import_assignments, import_project_updates, import_holidays
 from utils.xlsx_export import build_clean_xlsx
 from utils.project_update_import_validator import validate_project_updates_import, FIELD_LABELS, FIELD_ALIASES, get_column_mapping
@@ -50,9 +51,30 @@ def render_import_page():
         uploaded_file = st.file_uploader("Upload Projects File", type=["xls", "xlsx", "csv"], key="proj_csv")
         if uploaded_file:
             df = read_excel_or_csv(uploaded_file)
+            st.caption(f"📄 Loaded {len(df)} rows, {len(df.columns)} columns")
             if st.button("Import Projects", type="primary"):
-                success, msg = import_projects(df)
-                st.success(msg) if success else st.error(msg)
+                try:
+                    success, msg = import_projects(df)
+                    if success:
+                        st.session_state["proj_import_msg"] = ("success", msg)
+                    else:
+                        st.session_state["proj_import_msg"] = ("error", msg)
+                except Exception as ex:
+                    import traceback as _tb
+                    st.session_state["proj_import_msg"] = ("error", f"Exception: {ex}\n\n{_tb.format_exc()}")
+                st.rerun()
+        # Persistent result
+        if st.session_state.get("proj_import_msg"):
+            kind, msg = st.session_state["proj_import_msg"]
+            if kind == "success":
+                st.success(msg)
+            else:
+                st.error(msg)
+                with st.expander("🔍 Full error details"):
+                    st.code(msg)
+            if st.button("✖ Dismiss", key="dismiss_proj"):
+                st.session_state.pop("proj_import_msg", None)
+                st.rerun()
         
         sample_proj = pd.DataFrame([["P001", "1.1", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
         st.download_button("📥 Sample Project Excel", get_excel_download(sample_proj), "sample_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
@@ -80,6 +102,13 @@ def render_import_page():
         uploaded_file = st.file_uploader("Upload Update Projects File", type=["xls", "xlsx", "csv"], key="update_proj_csv")
         if uploaded_file:
             df = read_excel_or_csv(uploaded_file)
+            # Store df in session_state so it survives button reruns
+            st.session_state["update_proj_df"] = df
+        
+        # Use df from session_state if available (survives across reruns)
+        df = st.session_state.get("update_proj_df")
+        
+        if df is not None:
             # ── Check Validation when button clicked ──
             if st.button("Import Update Project", type="primary", key="btn_validate_update_proj"):
                 validation = validate_project_updates_import(df)
@@ -89,12 +118,27 @@ def render_import_page():
                 else:
                     success, msg = import_project_updates(df)
                     if success:
-                        st.success(msg)
                         st.session_state["import_success_msg"] = msg
+                        st.session_state["import_success_type"] = "success"
                     else:
-                        st.error(msg)
+                        st.session_state["import_success_msg"] = msg
+                        st.session_state["import_success_type"] = "error"
                     st.session_state.pop("show_update_preview", None)
                     st.session_state.pop("update_validation_data", None)
+                    st.session_state.pop("update_proj_df", None)
+                    st.rerun()
+
+            # ── Show persistent import result message ──
+            if st.session_state.get("import_success_msg"):
+                msg_type = st.session_state.get("import_success_type", "success")
+                if msg_type == "success":
+                    st.success(st.session_state["import_success_msg"])
+                else:
+                    st.error(st.session_state["import_success_msg"])
+                if st.button("✖ Dismiss", key="btn_dismiss_import_msg"):
+                    st.session_state.pop("import_success_msg", None)
+                    st.session_state.pop("import_success_type", None)
+                    st.rerun()
 
             # ── If conflicts or manual updates exist, show inline warning & preview ──
             if st.session_state.get("show_update_preview") and st.session_state.get("update_validation_data"):
@@ -174,19 +218,24 @@ def render_import_page():
                     if st.button("❌ Cancel", use_container_width=True, key="btn_cancel_update_import"):
                         st.session_state.pop("show_update_preview", None)
                         st.session_state.pop("update_validation_data", None)
+                        st.session_state.pop("update_proj_df", None)
                         st.info("Import cancelled. Existing project updates remain unchanged.")
                         st.rerun()
 
                 with col_btn_continue:
                     if st.button("✅ Continue Import", type="primary", use_container_width=True, key="btn_confirm_update_import"):
+                        # df is available from session_state
+                        import_df = st.session_state.get("update_proj_df", df)
                         st.session_state.pop("show_update_preview", None)
                         st.session_state.pop("update_validation_data", None)
-                        success, msg = import_project_updates(df)
+                        st.session_state.pop("update_proj_df", None)
+                        success, msg = import_project_updates(import_df)
                         if success:
-                            st.success(msg)
                             st.session_state["import_success_msg"] = msg
+                            st.session_state["import_success_type"] = "success"
                         else:
-                            st.error(msg)
+                            st.session_state["import_success_msg"] = msg
+                            st.session_state["import_success_type"] = "error"
                         st.rerun()
         
         sample_update_proj = pd.DataFrame(
