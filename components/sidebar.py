@@ -136,13 +136,13 @@ def render_sidebar(user):
         can_add_project = is_admin or get_employee_add_project_access(user.get("employee_id"))
 
         if is_admin:
-            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings", "❓  Help"]
+            options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2", "➕  Add Project", "👥  Employee", "📊  Report", "📥  Import", "⚙️  Settings", "🔐  2FA Security", "❓  Help"]
         else:
             # All employees can see Project Update (edit vs view-only controlled by access flag)
             options = ["📋  Timesheet", "🏢  Project V1", "📝  Project Update V2"]
             if can_add_project:
                 options.append("➕  Add Project")
-            options.append("❓  Help")
+            options.extend(["🔐  2FA Security", "❓  Help"])
 
         page_map = {
             "📋  Timesheet": "Timesheet Entries",
@@ -153,6 +153,7 @@ def render_sidebar(user):
             "📊  Report": "Reports",
             "📥  Import": "Import Data",
             "⚙️  Settings": "Settings",
+            "🔐  2FA Security": "2FA Security",
             "❓  Help": "Help",
         }
         reverse_map = {v: k for k, v in page_map.items()}

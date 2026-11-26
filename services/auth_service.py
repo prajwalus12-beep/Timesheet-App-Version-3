@@ -174,6 +174,7 @@ def create_session_token(user_data):
             meta = get_session_metadata()
             payload = {
                 "user": user_data,
+                "2fa_verified": True,
                 "exp": (datetime.now(timezone.utc) + timedelta(hours=24)).timestamp(),
                 "ua": meta["ua"],
                 "ip": meta["ip"]
@@ -198,11 +199,43 @@ def restore_session_from_token(token):
             meta = get_session_metadata()
             if payload.get("ua") != meta["ua"]:
                 return None
+
+            # 3. Require 2FA verification flag if user has 2FA enabled
+            user_data = payload.get("user")
+            if user_data and not payload.get("2fa_verified"):
+                from database.queries import get_user_2fa_record
+                rec = get_user_2fa_record(user_data.get("username"))
+                if rec and rec.get("two_fa_enabled"):
+                    return None
             
-            return payload.get("user")
+            return user_data
     except Exception:
         pass
     return None
+
+def complete_2fa_login(user_data):
+    """Complete authentication after 2FA verification or enrollment succeeds."""
+    st.session_state.pop("pending_2fa_user", None)
+    st.session_state.pop("pending_2fa_mode", None)
+    st.session_state.pop("pending_2fa_setup_secret", None)
+    st.session_state.pop("pending_2fa_setup_recovery", None)
+    st.session_state["logged_in"] = True
+    st.session_state["user"] = user_data
+    token = create_session_token(user_data)
+    if token:
+        st.query_params["session"] = token
+
+def cancel_pending_2fa():
+    """Clear pending 2FA state and return user to login screen."""
+    for key in [
+        "pending_2fa_user",
+        "pending_2fa_mode",
+        "pending_2fa_setup_secret",
+        "pending_2fa_setup_recovery",
+        "logged_in",
+        "user",
+    ]:
+        st.session_state.pop(key, None)
 
 def logout_user():
     for key in list(st.session_state.keys()): del st.session_state[key]
@@ -213,6 +246,12 @@ def check_login():
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
         st.session_state["user"] = None
+
+    # Block protected access while 2FA verification/setup is pending
+    if st.session_state.get("pending_2fa_user"):
+        st.session_state["logged_in"] = False
+        st.session_state["user"] = None
+        return None
 
     # Restore session from token on refresh
     if not st.session_state["user"]:

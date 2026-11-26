@@ -2320,3 +2320,285 @@ def get_last_report_email_status():
         return None
     except Exception:
         return None
+
+
+# ============================================================
+# Two-Factor Authentication (2FA) & Audit Log Queries
+# ============================================================
+
+_2FA_SETTINGS_KEY = "two_factor_auth_records"
+_2FA_AUDIT_KEY = "two_factor_audit_logs"
+
+
+def _load_2fa_store() -> dict:
+    """Load all 2FA records from app_settings JSON store."""
+    raw = get_app_setting(_2FA_SETTINGS_KEY, "{}")
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_2fa_store(store: dict) -> tuple:
+    """Persist all 2FA records to app_settings JSON store."""
+    return set_app_setting(_2FA_SETTINGS_KEY, json.dumps(store))
+
+
+def log_2fa_audit_event(event_type: str, actor_username: str, target_username: str, user_type: str, details: str = ""):
+    """Record a 2FA security audit event (enrollment, verification, enable/disable, admin changes)."""
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    entry = {
+        "event_type": event_type,
+        "actor_username": str(actor_username),
+        "target_username": str(target_username),
+        "user_type": str(user_type),
+        "details": str(details),
+        "created_at": now_iso,
+    }
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            supabase.table("two_factor_audit_logs").insert(entry).execute()
+        except Exception:
+            pass
+
+    try:
+        raw = get_app_setting(_2FA_AUDIT_KEY, "[]")
+        logs = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        if not isinstance(logs, list):
+            logs = []
+        logs.insert(0, entry)
+        # Keep most recent 500 audit events
+        set_app_setting(_2FA_AUDIT_KEY, json.dumps(logs[:500]))
+    except Exception as e:
+        print(f"Error logging 2FA audit event: {e}")
+
+
+def get_2fa_audit_logs(limit: int = 100) -> list:
+    """Retrieve recent 2FA audit log entries."""
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            res = supabase.table("two_factor_audit_logs").select("*").order("created_at", desc=True).limit(limit).execute()
+            if res.data is not None:
+                return res.data
+        except Exception:
+            pass
+    try:
+        raw = get_app_setting(_2FA_AUDIT_KEY, "[]")
+        logs = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        return logs[:limit] if isinstance(logs, list) else []
+    except Exception:
+        return []
+
+
+def get_user_2fa_record(username: str) -> dict | None:
+    """Fetch a user's 2FA record for backend authentication/setup."""
+    if not username:
+        return None
+    uname_key = str(username).strip().lower()
+
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            res = supabase.table("user_2fa").select("*").eq("username", uname_key).limit(1).execute()
+            if res.data:
+                return res.data[0]
+        except Exception:
+            pass
+
+    store = _load_2fa_store()
+    return store.get(uname_key)
+
+
+def get_all_2fa_statuses() -> dict:
+    """
+    Return sanitized 2FA status for all users (NO secrets or recovery hashes exposed).
+    Format: {username_lower: {"two_fa_enabled": bool, "setup_verified": bool, "last_verified_at": str|None}}
+    """
+    statuses = {}
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            res = supabase.table("user_2fa").select("username, two_fa_enabled, setup_verified, last_verified_at").execute()
+            if res.data is not None:
+                for row in res.data:
+                    statuses[str(row["username"]).lower()] = {
+                        "two_fa_enabled": bool(row.get("two_fa_enabled", False)),
+                        "setup_verified": bool(row.get("setup_verified", False)),
+                        "last_verified_at": row.get("last_verified_at"),
+                    }
+                return statuses
+        except Exception:
+            pass
+
+    store = _load_2fa_store()
+    for uname, rec in store.items():
+        statuses[str(uname).lower()] = {
+            "two_fa_enabled": bool(rec.get("two_fa_enabled", False)),
+            "setup_verified": bool(rec.get("setup_verified", False)),
+            "last_verified_at": rec.get("last_verified_at"),
+        }
+    return statuses
+
+
+def _upsert_2fa_record(uname_key: str, record: dict) -> tuple:
+    """Upsert a 2FA record into user_2fa table (if available) and app_settings store."""
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            supabase.table("user_2fa").upsert(record, on_conflict="username").execute()
+        except Exception:
+            pass
+
+    store = _load_2fa_store()
+    store[uname_key] = record
+    return _save_2fa_store(store)
+
+
+def save_user_2fa_setup(username: str, user_id: str, user_type: str, encrypted_secret: str, recovery_hashes: list) -> tuple:
+    """Save pending 2FA secret and hashed recovery codes prior to 6-digit verification."""
+    uname_key = str(username).strip().lower()
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    existing = get_user_2fa_record(uname_key) or {}
+
+    record = {
+        "user_id": str(user_id or uname_key),
+        "username": uname_key,
+        "user_type": "admin" if user_type == "admin" else "employee",
+        "two_fa_enabled": bool(existing.get("two_fa_enabled", False)),
+        "setup_verified": False,
+        "encrypted_secret": encrypted_secret,
+        "recovery_codes_hashed": recovery_hashes,
+        "last_used_timestep": None,
+        "failed_attempts": 0,
+        "locked_until": None,
+        "created_at": existing.get("created_at", now_iso),
+        "updated_at": now_iso,
+        "last_verified_at": existing.get("last_verified_at"),
+    }
+    ok, msg = _upsert_2fa_record(uname_key, record)
+    if ok:
+        log_2fa_audit_event("ENROLLMENT_STARTED", uname_key, uname_key, record["user_type"], "TOTP secret generated; awaiting verification")
+    return ok, msg
+
+
+def activate_user_2fa(username: str, matched_step: int) -> tuple:
+    """Mark 2FA setup as verified and active after successful 6-digit TOTP check."""
+    uname_key = str(username).strip().lower()
+    existing = get_user_2fa_record(uname_key)
+    if not existing:
+        return False, "2FA setup record not found."
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    existing["two_fa_enabled"] = True
+    existing["setup_verified"] = True
+    existing["last_used_timestep"] = int(matched_step)
+    existing["failed_attempts"] = 0
+    existing["locked_until"] = None
+    existing["updated_at"] = now_iso
+    existing["last_verified_at"] = now_iso
+
+    ok, msg = _upsert_2fa_record(uname_key, existing)
+    if ok:
+        log_2fa_audit_event("ENROLLMENT_COMPLETED", uname_key, uname_key, existing.get("user_type", "employee"), "2FA verified and enabled")
+    return ok, msg
+
+
+def disable_user_2fa(username: str, actor_username: str) -> tuple:
+    """Disable 2FA for a user (used by Admin for own account or employee management)."""
+    uname_key = str(username).strip().lower()
+    existing = get_user_2fa_record(uname_key)
+    if not existing:
+        return True, "2FA is already disabled."
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    existing["two_fa_enabled"] = False
+    existing["setup_verified"] = False
+    existing["encrypted_secret"] = None
+    existing["recovery_codes_hashed"] = []
+    existing["failed_attempts"] = 0
+    existing["locked_until"] = None
+    existing["updated_at"] = now_iso
+
+    ok, msg = _upsert_2fa_record(uname_key, existing)
+    if ok:
+        event = "ADMIN_DISABLED_2FA" if actor_username.lower() != uname_key else "USER_DISABLED_2FA"
+        log_2fa_audit_event(event, actor_username, uname_key, existing.get("user_type", "employee"), f"2FA disabled by {actor_username}")
+    return ok, msg
+
+
+def admin_set_employee_2fa(target_username: str, target_user_id: str, enabled: bool, admin_username: str) -> tuple:
+    """
+    Admin control to enable or disable 2FA for an individual employee.
+    When enabled, employee is prompted to configure their authenticator on next login if not yet verified.
+    """
+    uname_key = str(target_username).strip().lower()
+    if not enabled:
+        return disable_user_2fa(uname_key, admin_username)
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    existing = get_user_2fa_record(uname_key) or {}
+    record = {
+        "user_id": str(target_user_id or uname_key),
+        "username": uname_key,
+        "user_type": "employee",
+        "two_fa_enabled": True,
+        "setup_verified": bool(existing.get("setup_verified", False) and existing.get("encrypted_secret")),
+        "encrypted_secret": existing.get("encrypted_secret"),
+        "recovery_codes_hashed": existing.get("recovery_codes_hashed", []),
+        "last_used_timestep": existing.get("last_used_timestep"),
+        "failed_attempts": 0,
+        "locked_until": None,
+        "created_at": existing.get("created_at", now_iso),
+        "updated_at": now_iso,
+        "last_verified_at": existing.get("last_verified_at"),
+    }
+    ok, msg = _upsert_2fa_record(uname_key, record)
+    if ok:
+        log_2fa_audit_event(
+            "ADMIN_ENABLED_2FA",
+            admin_username,
+            uname_key,
+            "employee",
+            "2FA enabled by admin; employee will configure on next login" if not record["setup_verified"] else "2FA re-enabled by admin",
+        )
+    return ok, msg
+
+
+def record_2fa_verification_result(
+    username: str,
+    success: bool,
+    matched_step: int = None,
+    failed_attempts: int = 0,
+    locked_until: str = None,
+    recovery_hashes: list = None,
+    used_recovery: bool = False,
+) -> tuple:
+    """Update verification state, replay timestep, rate-limit counters, and audit log."""
+    uname_key = str(username).strip().lower()
+    existing = get_user_2fa_record(uname_key)
+    if not existing:
+        return False, "2FA record not found."
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    existing["updated_at"] = now_iso
+    if success:
+        existing["failed_attempts"] = 0
+        existing["locked_until"] = None
+        existing["last_verified_at"] = now_iso
+        if matched_step is not None:
+            existing["last_used_timestep"] = int(matched_step)
+        if recovery_hashes is not None:
+            existing["recovery_codes_hashed"] = recovery_hashes
+        event = "RECOVERY_CODE_USED" if used_recovery else "VERIFY_SUCCESS"
+        log_2fa_audit_event(event, uname_key, uname_key, existing.get("user_type", "employee"), "2FA login verified")
+    else:
+        existing["failed_attempts"] = int(failed_attempts)
+        existing["locked_until"] = locked_until
+        event = "RATE_LIMIT_LOCKOUT" if locked_until else "VERIFY_FAILURE"
+        log_2fa_audit_event(event, uname_key, uname_key, existing.get("user_type", "employee"), f"Failed attempt {failed_attempts}")
+
+    return _upsert_2fa_record(uname_key, existing)
+

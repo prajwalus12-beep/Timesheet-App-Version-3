@@ -12,6 +12,8 @@ from pages.project_update_page_v2 import render_project_update_page_v2
 from pages.add_project_page import render_add_project_page
 from pages.settings_page import render_settings_page
 from pages.help_page import render_help_page
+from pages.employee_2fa_page import render_employee_2fa_setup_page, render_employee_2fa_verify_page
+from pages.admin_2fa_page import render_admin_2fa_setup_page, render_admin_2fa_verify_page
 from components.help_banner import render_help_banner
 from config.constants import PAGE_CONFIG
 
@@ -37,14 +39,29 @@ if "scheduler_initialized" not in st.session_state:
 user = check_login()
 
 if not user:
-    # Hide sidebar when not logged in
+    # Hide sidebar when not logged in (including during pending 2FA)
     st.markdown("""
         <style>
             [data-testid="stSidebar"] { display: none; }
             [data-testid="collapsedControl"] { display: none; }
         </style>
     """, unsafe_allow_html=True)
-    render_login_page()
+
+    pending_user = st.session_state.get("pending_2fa_user")
+    if pending_user:
+        mode = st.session_state.get("pending_2fa_mode", "verify")
+        if pending_user.get("role") == "admin":
+            if mode == "setup":
+                render_admin_2fa_setup_page(pending_user, is_login_flow=True)
+            else:
+                render_admin_2fa_verify_page(pending_user)
+        else:
+            if mode == "setup":
+                render_employee_2fa_setup_page(pending_user, is_login_flow=True)
+            else:
+                render_employee_2fa_verify_page(pending_user)
+    else:
+        render_login_page()
 else:
     # Ensure sidebar toggle button is visible when logged in (overriding login page CSS)
     st.markdown("""
@@ -84,4 +101,9 @@ else:
         else:
             st.error("⛔ Access Denied: You do not have permission to access the Add Project page.")
     elif page == "Settings": render_settings_page(user)
+    elif page == "2FA Security":
+        if user.get("role") == "admin":
+            render_admin_2fa_setup_page(user, is_login_flow=False)
+        else:
+            render_employee_2fa_setup_page(user, is_login_flow=False)
     elif page == "Help": render_help_page(user)
