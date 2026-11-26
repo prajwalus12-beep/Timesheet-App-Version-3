@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import traceback
-from database.queries import import_employees, import_projects, import_assignments, import_project_updates, import_holidays
+from database.queries import import_employees, import_assignments, import_project_updates, import_holidays
 from utils.xlsx_export import build_clean_xlsx
 from utils.project_update_import_validator import validate_project_updates_import, FIELD_LABELS, FIELD_ALIASES, get_column_mapping
 
@@ -27,8 +27,8 @@ def read_excel_or_csv(uploaded_file):
 
 def render_import_page():
     st.subheader("Import Data", divider="blue")
-    col_emp, col_proj = st.columns(2)
-    col_assign, col_update = st.columns(2)
+    col_emp, col_update = st.columns(2)
+    col_assign, col_holiday = st.columns(2)
     
     with col_emp:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
@@ -43,42 +43,6 @@ def render_import_page():
         sample_emp = pd.DataFrame([["101", "John Doe", "U12345", "john.doe@example.com"]], columns=['a__Serial', 'Name', 'Slack ID', 'Email'])
         st.download_button("📥 Sample Employee Excel", get_excel_download(sample_emp), "sample_employees.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.info("Required: 'a__Serial', 'Name', 'Slack ID', 'Email'.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_proj:
-        st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
-        st.write("### 🏗️ Projects")
-        uploaded_file = st.file_uploader("Upload Projects File", type=["xls", "xlsx", "csv"], key="proj_csv")
-        if uploaded_file:
-            df = read_excel_or_csv(uploaded_file)
-            st.caption(f"📄 Loaded {len(df)} rows, {len(df.columns)} columns")
-            if st.button("Import Projects", type="primary"):
-                try:
-                    success, msg = import_projects(df)
-                    if success:
-                        st.session_state["proj_import_msg"] = ("success", msg)
-                    else:
-                        st.session_state["proj_import_msg"] = ("error", msg)
-                except Exception as ex:
-                    import traceback as _tb
-                    st.session_state["proj_import_msg"] = ("error", f"Exception: {ex}\n\n{_tb.format_exc()}")
-                st.rerun()
-        # Persistent result
-        if st.session_state.get("proj_import_msg"):
-            kind, msg = st.session_state["proj_import_msg"]
-            if kind == "success":
-                st.success(msg)
-            else:
-                st.error(msg)
-                with st.expander("🔍 Full error details"):
-                    st.code(msg)
-            if st.button("✖ Dismiss", key="dismiss_proj"):
-                st.session_state.pop("proj_import_msg", None)
-                st.rerun()
-        
-        sample_proj = pd.DataFrame([["P001", "1.1", "Website Redesign", "In progress", "Alice", "https://trello.com/b/123"]], columns=['Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'])
-        st.download_button("📥 Sample Project Excel", get_excel_download(sample_proj), "sample_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority', 'Project', 'Status', 'Lead engineer', 'Trello'. Supports decimal priority (e.g. 1.1).")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_assign:
@@ -98,8 +62,8 @@ def render_import_page():
 
     with col_update:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
-        st.write("### 🔄 Update Projects")
-        uploaded_file = st.file_uploader("Upload Update Projects File", type=["xls", "xlsx", "csv"], key="update_proj_csv")
+        st.write("### 🔄 Projects & Project Updates")
+        uploaded_file = st.file_uploader("Upload Projects / Update Projects File", type=["xls", "xlsx", "csv"], key="update_proj_csv")
         if uploaded_file:
             df = read_excel_or_csv(uploaded_file)
             # Store df in session_state so it survives button reruns
@@ -110,7 +74,7 @@ def render_import_page():
         
         if df is not None:
             # ── Check Validation when button clicked ──
-            if st.button("Import Update Project", type="primary", key="btn_validate_update_proj"):
+            if st.button("Import & Update Projects", type="primary", key="btn_validate_update_proj"):
                 validation = validate_project_updates_import(df)
                 if validation.get("has_conflicts") or validation.get("has_manual_updates"):
                     st.session_state["show_update_preview"] = True
@@ -252,12 +216,11 @@ def render_import_page():
                 'Estimated Days', 'Actual Days', 'Notes'
             ]
         )
-        st.download_button("📥 Sample Update Project Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        st.info("Required: 'Job No', 'Job Priority' (numeric or decimal e.g. 1.1), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS). Optional: 'Notes' column for project notes.")
+        st.download_button("📥 Sample Project / Update Excel", get_excel_download(sample_update_proj), "sample_update_projects.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.info("Updates both Project V1 and Project Update V2 screens. Required: 'Job No', 'Job Priority' (numeric or decimal e.g. 1.1), 'Priority' (used as Name if 'Project' is missing), 'Lead engineer'. Supports multiple aliases for Status, Phase, Dates, and Checkboxes (BC, Trello, WA, WS). Optional: 'Notes' column for project notes.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Row 3: Holiday Import ---
-    col_holiday, col_blank = st.columns(2)
+    # --- Holiday Import ---
     with col_holiday:
         st.markdown('<div class="table-container" style="padding: 20px;">', unsafe_allow_html=True)
         st.write("### 🏖️ Holidays")

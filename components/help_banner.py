@@ -42,7 +42,7 @@ PAGE_HELP_INFO = {
     "Import Data": {
         "title": "Data Import & Synchronization",
         "employee_msg": "Need information on system data synchronization? Take help from our documentation.",
-        "admin_msg": "Unsure about required Excel column formats, foreign-key import sequence (Projects before Update Projects), or conflict resolution? Take help from our import guide.",
+        "admin_msg": "Unsure about required Excel column formats, unified project import (updates both Project V1 & Project Update V2), or conflict resolution? Take help from our import guide.",
     },
     "Settings": {
         "title": "System Settings",

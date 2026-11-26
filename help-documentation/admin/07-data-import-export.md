@@ -7,25 +7,18 @@
 
 ## Overview
 
-The Import Data module allows admins to bulk-load records from Excel files into the system. It supports 5 import types. Data is validated before import and the system shows a summary of new, updated, and skipped records.
+The Import Data module allows admins to bulk-load records from Excel or CSV files into the system. It supports 4 import modules, including a **single unified Projects & Project Updates import** that updates both the **Project V1** and **Project Update V2** screens. Data is validated before import and the system shows a summary of new, updated, and skipped records.
 
 **Navigation:** Sidebar → 📥 **Import Data**
 
 ---
 
-## ⚠️ Import Order — CRITICAL
+## 📋 Recommended Import Order
 
-> [!CAUTION]
-> You **must** import data in this order. Some imports depend on data from previous imports.
->
-> **Required Order:**
-> 1. Import Employees
-> 2. Import Projects ← must come before Import Update Projects
-> 3. Import Assignments
-> 4. Import Update Projects ← requires projects to exist first
-> 5. Import Holidays
-
-If you import **Update Projects** before **Projects**, records will be skipped because the project codes will not be found in the database.
+1. **Import Employees**
+2. **Import Projects & Project Updates** *(Unified — updates both Project V1 and Project Update V2)*
+3. **Import Assignments**
+4. **Import Holidays**
 
 ---
 
@@ -63,99 +56,46 @@ Imports employee records from an Excel file.
 
 ---
 
-## 2. Import Projects
+## 2. Import Projects & Project Updates (Unified)
 
-Imports project master records from an Excel file (typically exported from FMP).
+This **single, unified import** updates **both** the **Project V1** screen and the **Project Update V2** screen from one Excel/CSV sheet.
 
-### Required Columns
-
-| Column Name | Description |
-|-------------|-------------|
-| Job No | Unique project code |
-| Project Name | Full project name |
-| Status | Project status (Active/Completed/On Hold/Cancelled) |
-| Priority | Priority value |
-| Lead Engineer | Responsible engineer name |
-| Trello Link | Trello board URL (optional) |
-
-### Steps
-
-1. Click **"Import Projects"** section.
-2. Download the sample template.
-3. Prepare your Excel file following the column names exactly.
-4. Upload and click **"Import"**.
-5. Review the result summary.
-
-### Notes
-
-- Project names with trailing spaces or tabs are automatically stripped before saving.
-- Invalid status values (not in the approved list) are **skipped** — only valid statuses are imported.
-- If a project code already exists, its record is **updated** (not duplicated).
-
-### Valid Status Values
-
-`Active`, `Completed`, `On Hold`, `Cancelled`
-
-> [!WARNING]
-> Status values like `_`, blank, or unrecognized strings will be **skipped** automatically.
-
----
-
-## 3. Import Assignments
-
-Imports project-employee assignments (which employees are assigned to which projects).
-
-### Required Columns
-
-| Column Name | Description |
-|-------------|-------------|
-| Employee ID | Employee's numeric ID |
-| Job No | Project code |
-
-### Steps
-
-Standard import steps: Download sample → Fill data → Upload → Review summary.
-
----
-
-## 4. Import Update Projects (Project Reports)
-
-Imports or updates the project update/status fields (the editable data shown in Project Updates V2).
-
-> [!IMPORTANT]
-> **Import Projects must be run first.** This import reads project codes from the `project_reports` table, which is populated by the Projects import.
-
-### Required Columns
+### Required & Supported Columns
 
 | Column Name | Maps To | Description |
 |-------------|---------|-------------|
-| Job No | Project code | Must match an existing project code |
+| Job No | Project code | Unique project code |
+| Job Priority | Priority | Numeric or decimal priority (e.g., `1.1`) |
+| Priority | Project Name | Used as Project Name if `Project` column is missing |
+| Lead engineer | Lead Engineer | Assigned engineer name |
+| Search_Project / Status | Status | Project status (supports aliases) |
 | Current Phase_g | Phase | Current project phase |
-| Status | Status | Project status |
-| Actual Days | Actual days | Days spent (fractional values are rounded) |
-| Notes | Notes | Project notes |
+| Start Date / Finish Date | Dates | Project start and finish dates |
+| CheckBoxe BC / Trello / WA / WS | Checkboxes | Boolean flags |
+| Estimated Days / Actual Days | Days | Planned and actual days (fractional values are rounded) |
+| Notes | Notes | Optional project notes |
 
 ### Steps
 
-1. Click **"Import Update Projects"** section.
-2. Download the sample template.
-3. Upload your prepared Excel file.
-4. A **preview table** appears showing:
+1. Locate the **"🔄 Projects & Project Updates"** section.
+2. Click **"📥 Sample Project / Update Excel"** to download the template.
+3. Upload your prepared Excel or CSV file.
+4. Click **"Import & Update Projects"**.
+5. If conflicts or manual UI updates exist, a **preview table** appears showing:
    - Rows with **differences** highlighted in red
    - A mismatch summary table showing old vs new values
-5. Review the preview carefully.
-6. Click **"Continue Import"** to apply changes, or **"Cancel"** to abort.
+6. Review the preview carefully and click **"Continue Import"** to apply changes, or **"Cancel"** to abort.
 
 ### Result Summary
 
 | Message | Meaning |
 |---------|---------|
-| `X updated` | Records where data was different and updated |
-| `X new entries` | New project codes added (only if not in DB) |
-| `X skipped (FK not found)` | Project code doesn't exist in master — skipped |
+| `X updated` | Existing project records updated across Project V1 & Project Update V2 |
+| `X new entries` | New project codes added |
+| `X skipped` | Records skipped due to invalid data or missing required fields |
 
 > [!NOTE]
-> If all project codes already exist and have matching data, you will see `0 new entries` — this is correct behavior, not an error.
+> If all project codes already exist and have matching data, you will see `0 new entries` — this is expected behavior, not an error.
 
 ---
 
