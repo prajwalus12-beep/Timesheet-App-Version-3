@@ -1418,6 +1418,30 @@ def import_project_updates(df):
                 to_insert.append(_sanitize_dict(record))
                 new_count += 1
 
+        # Sync core project fields into the 'project' table FIRST so new/updated jobs
+        # appear in Timesheet Add/Edit Entry dropdowns (which read from 'project')
+        # and satisfy any FK constraints on 'project_reports'.
+        project_sync_records = []
+        for rec in (to_insert + to_update):
+            p_code = rec.get('project_code')
+            if not p_code:
+                continue
+            raw_name = str(rec.get('project_name') or '').strip()
+            p_status = str(rec.get('status') or 'In progress').strip()
+            project_sync_records.append(_sanitize_dict({
+                "project_code": p_code,
+                "project_name": encrypt_data(raw_name),
+                "status": p_status if p_status else 'In progress',
+                "priority": rec.get('priority'),
+                "lead_engineer": rec.get('lead_engineer'),
+                "trello_link": rec.get('trello_link'),
+            }))
+        if project_sync_records:
+            try:
+                supabase.table('project').upsert(project_sync_records, on_conflict='project_code').execute()
+            except Exception as proj_sync_err:
+                print(f"Warning syncing to project table: {proj_sync_err}")
+
         # FIX BUG: Insert new project_reports records one at a time so a single
         # FK-violation (project_code not yet in 'project' table) doesn't silently
         # block ALL new inserts. Each failure is logged but processing continues.
