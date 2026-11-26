@@ -14,16 +14,16 @@ Open the application URL in your browser. You will see the **Login Page**.
 
 1. **Select your username** from the dropdown list.
    - Usernames are auto-generated from your name (e.g., `john.doe`).
-   - The dropdown only shows active employee accounts.
+   - The dropdown only shows active accounts.
 
 2. **Enter your password** in the password field.
 
-3. **Solve the CAPTCHA** shown on screen.
-   - The CAPTCHA is a **6-character alphanumeric code** (e.g., `A3bX9z`).
-   - It is case-sensitive. Type exactly what you see.
-   - If you cannot read it, reload the page to get a new CAPTCHA.
+3. Click **Sign In**.
 
-4. Click **Login**.
+4. **Complete Two-Factor Authentication (if enabled):**
+   - If Admin 2FA is enabled for your account, you are redirected to the **Admin 2FA Verification** page.
+   - Open your authenticator app (Google Authenticator, Microsoft Authenticator, Authy, or any TOTP app) and enter the **6-digit code** (or a single-use **Recovery Code**).
+   - You cannot access the Admin Dashboard until 2FA verification succeeds.
 
 ### What Happens After Login
 - You are redirected to the **Dashboard / Timesheet** page.
@@ -58,6 +58,8 @@ After login, the sidebar displays the following modules (admin view):
 | 📊 Reports | Analytics, KPIs, PDF export |
 | 📥 Import Data | Bulk import via Excel |
 | ⚙️ Settings | System settings (lockout, reminders, holidays) |
+| 🔐 2FA Security | Configure Admin 2FA (QR code, manual key, recovery codes, enable/disable) |
+| ❓ Help | Interactive Help & Documentation Center |
 
 > [!NOTE]
 > Employee accounts may see fewer modules depending on their permissions. Admins always see all modules.

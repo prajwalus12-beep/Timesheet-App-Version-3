@@ -127,3 +127,26 @@ Format: `firstname.lastname` (e.g., `john.doe`)
 
 - You **cannot change your username**.
 - If your name changes (e.g., due to marriage), contact your admin to update your profile information. The username will remain the same.
+
+---
+
+## 9. Two-Factor Authentication (2FA)
+
+Two-Factor Authentication adds a second layer of security to your login using any standard TOTP authenticator app (**Google Authenticator**, **Microsoft Authenticator**, **Authy**, etc.).
+
+### How to Enable & Configure 2FA
+
+1. Open **🔐 2FA Security** in the sidebar (or you will be prompted automatically at login if your Admin enabled 2FA for your account).
+2. Open your authenticator app and tap **+ / Add Account**.
+3. **Scan the QR code** on screen, **or** copy and enter the **Manual Setup Key**.
+4. Enter the **6-digit verification code** shown in your authenticator app and click **Verify & Enable 2FA**.
+5. **Save your 8 single-use Recovery Codes** (`XXXX-XXXX` format) in a safe place (download or copy them). Each recovery code can be used once if you lose your phone.
+
+### How to Disable Your Own 2FA
+
+1. Go to **🔐 2FA Security** in the sidebar.
+2. Click **Disable My 2FA**.
+3. You can re-enable 2FA at any time.
+
+> [!NOTE]
+> After 5 failed 2FA verification attempts, verification is locked for **15 minutes** for security.

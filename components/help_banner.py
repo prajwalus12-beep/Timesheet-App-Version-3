@@ -49,6 +49,11 @@ PAGE_HELP_INFO = {
         "employee_msg": "Need information on weekly lockout hours or timesheet submission schedules? Take help from our guide.",
         "admin_msg": "Need help configuring weekly lockout days, employee permissions, reminder SMTP schedules, or public holiday exclusions? Take help from our guide.",
     },
+    "2FA Security": {
+        "title": "Two-Factor Authentication (2FA)",
+        "employee_msg": "Need help scanning the QR code, using an authenticator app, saving recovery codes, or disabling 2FA? Take help from our security guide.",
+        "admin_msg": "Need help configuring or disabling Admin 2FA, generating recovery codes, or managing employee 2FA? Take help from our security guide.",
+    },
 }
 
 DEFAULT_HELP = {

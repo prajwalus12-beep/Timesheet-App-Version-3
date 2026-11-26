@@ -14,7 +14,10 @@ This guide lists every validation and error message you may encounter in the app
 |---------------|----------------|------------|
 | "Incorrect password" | Wrong password entered | Re-enter your correct password |
 | "Account locked. Try again in X minutes." | 5 consecutive failed login attempts | Wait the stated minutes; or ask admin to reset password |
-| "Invalid CAPTCHA" | CAPTCHA typed incorrectly | Reload the page and type the new CAPTCHA carefully — it is case-sensitive |
+| "Invalid 6-digit authenticator code." | Wrong or expired TOTP code entered | Check your device clock and enter the current 6-digit code from your authenticator app |
+| "This code has already been used." | Same 6-digit TOTP code submitted twice | Wait up to 30 seconds for the next code to generate |
+| "Too many invalid 2FA attempts. Locked for 15 minute(s)." | 5 consecutive failed 2FA attempts | Wait 15 minutes or contact your admin |
+| "Invalid or already used recovery code." | Wrong or previously consumed backup code | Enter an unused `XXXX-XXXX` recovery code from your saved list |
 | "Username not found" | Username not in system | Check the username dropdown — select from the list, don't type manually |
 
 ---

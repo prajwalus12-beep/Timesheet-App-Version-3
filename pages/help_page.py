@@ -106,6 +106,7 @@ def render_help_page(user):
             "Reports": "report",
             "Import Data": "import",
             "Settings": "setting",
+            "2FA Security": "security" if role == "employee" else "getting-started",
         }.get(initial_page, "")
         if keyword:
             role_docs = docs_data.get(role, [])

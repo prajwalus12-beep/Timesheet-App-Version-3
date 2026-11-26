@@ -20,11 +20,10 @@ The FMP Timesheet Application is used to log your daily work hours, track projec
    - Usernames look like: `john.doe`, `priya.sharma`
    - If your name is not in the list, contact your admin.
 3. **Enter your password** in the password field.
-4. **Solve the CAPTCHA** shown on screen.
-   - It is a **6-character code** with letters and numbers (e.g., `Xk7P2m`).
-   - Type it exactly as shown — it is **case-sensitive**.
-   - If you can't read it, reload the page for a new CAPTCHA.
-5. Click **Login**.
+4. Click **Sign In**.
+5. **Complete Two-Factor Authentication (if enabled or required):**
+   - If 2FA is enabled and configured, enter the **6-digit code** from your authenticator app (or a backup recovery code) on the **Employee 2FA Verification** page.
+   - If your admin enabled 2FA for your account and you haven't set it up yet, you will be guided through **Employee 2FA Setup** (scan QR code or enter manual key) before entering the app.
 
 ---
 
@@ -45,6 +44,8 @@ Your access depends on your role and any extra permissions your admin has grante
 | 🗒️ Timesheet | ✅ Full access (your own entries only) |
 | 📁 Projects | ✅ View only |
 | 🔄 Project Updates | ✅ View only (unless extra permission granted) |
+| 🔐 2FA Security | ✅ Set up or disable your own Two-Factor Authentication |
+| ❓ Help | ✅ Interactive Help & Documentation |
 
 ### With Extra Permissions
 

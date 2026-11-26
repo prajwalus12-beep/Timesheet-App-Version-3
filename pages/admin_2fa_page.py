@@ -10,7 +10,7 @@ import streamlit as st
 from services.two_factor_service import (
     generate_totp_secret,
     get_provisioning_uri,
-    generate_qr_code_bytes,
+    generate_qr_code_html,
     verify_totp_code,
     encrypt_totp_secret,
     decrypt_totp_secret,
@@ -110,13 +110,13 @@ def render_admin_2fa_setup_page(user: dict, is_login_flow: bool = False):
     _init_admin_setup_state(username, str(user_id))
     secret = st.session_state["pending_2fa_setup_secret"]
     uri = get_provisioning_uri(secret, f"{username} (Admin)")
-    qr_bytes = generate_qr_code_bytes(uri)
+    qr_html = generate_qr_code_html(uri, caption="Admin Authenticator QR Code", width=220)
 
     with st.container(border=True):
         st.info("🔴 **Admin 2FA Status: Disabled** — Scan the QR code below to activate 2FA.")
         qr_col, instr_col = st.columns([1.0, 1.5])
         with qr_col:
-            st.image(qr_bytes, caption="Admin Authenticator QR Code", width=220)
+            st.markdown(qr_html, unsafe_allow_html=True)
         with instr_col:
             st.markdown("**Step 1:** Open Google Authenticator, Microsoft Authenticator, Authy, or any TOTP app.")
             st.markdown("**Step 2:** Scan the QR code or enter this manual setup key:")

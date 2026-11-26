@@ -31,6 +31,7 @@ The Directory tab lists all registered employees with their key details.
 | Slack ID | Slack workspace handle |
 | Employment Type | Full-Time / Part-Time / Contractor / Intern |
 | Status | Active / Inactive |
+| 2FA Status | `Enabled`, `Pending Setup`, or `Disabled` |
 | Password | Shown decrypted for admin reference |
 
 ### Searching Employees
@@ -149,3 +150,20 @@ After creating an employee, you can grant additional access from **Settings → 
 | `allow_add_project` | Allows the employee to access the Add Project staging area |
 
 See [System Settings →](./08-system-settings.md) for details.
+
+---
+
+## 7. Employee 2FA Management (Tab: 🔐 2FA Management)
+
+Admins can centrally enable or disable Two-Factor Authentication (2FA) for individual employees:
+
+1. Open **Employees → 🔐 2FA Management**.
+2. Review each employee's **2FA Status**:
+   - **Enabled (Verified):** Employee has configured an authenticator app.
+   - **Enabled (Pending Setup):** Admin enabled 2FA; the employee will be prompted to scan a QR code and configure their authenticator app on their next login.
+   - **Disabled:** Employee logs in with username and password only.
+3. Click **Enable 2FA** or **Disable 2FA** next to any employee. Status updates immediately.
+4. Expand **Recent 2FA Security Audit Logs** at the bottom of the tab to review enrollment, verification, and admin enable/disable events.
+
+> [!NOTE]
+> For security, employee authenticator secrets are encrypted at rest and are **never** visible to Admins.

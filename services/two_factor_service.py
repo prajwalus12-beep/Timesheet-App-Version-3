@@ -7,6 +7,7 @@ Fernet encryption at rest, and rate-limit helpers.
 """
 
 import io
+import base64
 import time
 import hashlib
 import secrets
@@ -49,6 +50,23 @@ def generate_qr_code_bytes(uri: str) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def generate_qr_code_html(uri: str, caption: str = "", width: int = 220) -> str:
+    """Return an inline Base64 <img> HTML snippet so QR codes never break on Streamlit Cloud."""
+    b64 = base64.b64encode(generate_qr_code_bytes(uri)).decode("ascii")
+    caption_html = (
+        f'<div style="font-size:12px;color:#64748B;margin-top:6px;">{caption}</div>'
+        if caption
+        else ""
+    )
+    return (
+        f'<div style="text-align:center;padding:8px 0;">'
+        f'<img src="data:image/png;base64,{b64}" width="{width}" height="{width}" '
+        f'alt="{caption or "2FA QR Code"}" style="border-radius:8px;border:1px solid #E2E8F0;" />'
+        f'{caption_html}'
+        f'</div>'
+    )
 
 
 def verify_totp_code(

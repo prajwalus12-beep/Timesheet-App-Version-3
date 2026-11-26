@@ -10,7 +10,7 @@ import streamlit as st
 from services.two_factor_service import (
     generate_totp_secret,
     get_provisioning_uri,
-    generate_qr_code_bytes,
+    generate_qr_code_html,
     verify_totp_code,
     encrypt_totp_secret,
     decrypt_totp_secret,
@@ -113,7 +113,7 @@ def render_employee_2fa_setup_page(user: dict, is_login_flow: bool = False):
         _init_setup_state(username, str(user_id), "employee")
         secret = st.session_state["pending_2fa_setup_secret"]
         uri = get_provisioning_uri(secret, username)
-        qr_bytes = generate_qr_code_bytes(uri)
+        qr_html = generate_qr_code_html(uri, caption="Scan QR Code with Authenticator App", width=220)
 
         with st.container(border=True):
             st.markdown("### Configure Authenticator App")
@@ -123,7 +123,7 @@ def render_employee_2fa_setup_page(user: dict, is_login_flow: bool = False):
 
             qr_col, instr_col = st.columns([1.1, 1.4])
             with qr_col:
-                st.image(qr_bytes, caption="Scan QR Code with Authenticator App", width=220)
+                st.markdown(qr_html, unsafe_allow_html=True)
             with instr_col:
                 st.markdown("**Step 1:** Open your authenticator app and tap **+ / Add Account**.")
                 st.markdown("**Step 2:** Scan the QR code on the left, **or** enter this manual setup key:")

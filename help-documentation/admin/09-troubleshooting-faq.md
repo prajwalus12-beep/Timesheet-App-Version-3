@@ -34,9 +34,11 @@ This guide covers the most common issues admins encounter, their causes, and ste
 
 ---
 
-### Q: The login page CAPTCHA is unreadable.
+### Q: An employee lost their authenticator app or is locked out of 2FA.
 
-**Solution:** Reload the login page. A new CAPTCHA is generated on each load.
+**Solution:**
+1. The employee can sign in using one of their single-use **Recovery Codes** (`XXXX-XXXX`) on the **Recovery Code** tab of the 2FA Verification screen.
+2. If they lost all recovery codes or are locked out (5 failed 2FA attempts = 15-minute lock), go to **Employees → 🔐 2FA Management** and click **Disable 2FA** (or re-enable 2FA so they can re-configure a new QR code on next login).
 
 ---
 
