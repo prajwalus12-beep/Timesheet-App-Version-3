@@ -1231,9 +1231,16 @@ def import_project_updates(df):
             return s
 
     try:
-        # Fetch existing records for comparison
+        # Fetch existing records for comparison.
+        # Build existing_map keyed on project_code; if duplicates exist in DB,
+        # keep the row with the LOWEST id (the original / canonical record).
         existing_res = supabase.table('project_reports').select('*').execute()
-        existing_map = {r['project_code']: r for r in (existing_res.data or [])}
+        _all_existing = existing_res.data or []
+        existing_map = {}
+        for r in _all_existing:
+            code_key = r['project_code']
+            if code_key not in existing_map or r['id'] < existing_map[code_key]['id']:
+                existing_map[code_key] = r
         
         # Map DB fields to potential Excel column aliases for robust matching
         field_aliases = {
@@ -1282,6 +1289,7 @@ def import_project_updates(df):
         updated_count = 0
         fk_skipped = 0
         cleared_count = 0
+        seen_codes_in_file = set()  # Deduplicate within the same Excel file
 
         # Valid status values — used to filter out placeholder/invalid values like '_'
         _valid_statuses = {
@@ -1325,6 +1333,12 @@ def import_project_updates(df):
             code = _normalize_code(row.get('Job No') or row.get('Project Code') or row.get('Job_No') or row.get('Project_Code') or '')
             if not code or code.lower() == 'nan':
                 continue
+
+            # DEDUPLICATION: Skip rows whose project_code was already processed
+            # from this same Excel file (handles duplicate rows in a single import).
+            if code in seen_codes_in_file:
+                continue
+            seen_codes_in_file.add(code)
 
             record = {"project_code": code}
             
@@ -1442,23 +1456,43 @@ def import_project_updates(df):
             except Exception as proj_sync_err:
                 print(f"Warning syncing to project table: {proj_sync_err}")
 
-        # FIX BUG: Insert new project_reports records one at a time so a single
-        # FK-violation (project_code not yet in 'project' table) doesn't silently
-        # block ALL new inserts. Each failure is logged but processing continues.
+        # FIX: For project_reports inserts, use UPDATE-if-exists / INSERT-if-new logic
+        # based on project_code to avoid creating duplicate rows.
+        # (project_reports may not have a UNIQUE constraint on project_code, so we
+        #  enforce uniqueness in application code.)
         fk_skipped = 0
         insert_errors = []
         for rec in to_insert:
-            try:
-                supabase.table('project_reports').insert(rec).execute()
-            except Exception as insert_err:
-                err_str = str(insert_err)
-                # Detect FK violations: project_code not in 'project' table
-                if 'foreign key' in err_str.lower() or 'fk_' in err_str.lower() or 'violates' in err_str.lower():
-                    fk_skipped += 1
-                    print(f"FK skip for project {rec.get('project_code')}: {err_str}")
-                else:
-                    insert_errors.append(f"project {rec.get('project_code')}: {err_str}")
-                    print(f"Insert error for project {rec.get('project_code')}: {err_str}")
+            p_code = rec.get('project_code')
+            # Double-check: if this code already exists in DB (e.g. from a previous partial
+            # import that created a duplicate), UPDATE rather than INSERT.
+            existing_check = supabase.table('project_reports').select('id').eq('project_code', p_code).execute()
+            if existing_check.data:
+                # Row exists — update it (use the first/lowest-id row, delete extras)
+                existing_ids = sorted([r['id'] for r in existing_check.data])
+                canonical_id = existing_ids[0]
+                # Delete any extra duplicate rows
+                for extra_id in existing_ids[1:]:
+                    try:
+                        supabase.table('project_reports').delete().eq('id', extra_id).execute()
+                    except Exception:
+                        pass
+                try:
+                    update_rec = {k: v for k, v in rec.items() if k != 'project_code'}
+                    supabase.table('project_reports').update(update_rec).eq('id', canonical_id).execute()
+                except Exception as upd_err:
+                    insert_errors.append(f"project {p_code}: {str(upd_err)}")
+            else:
+                try:
+                    supabase.table('project_reports').insert(rec).execute()
+                except Exception as insert_err:
+                    err_str = str(insert_err)
+                    if 'foreign key' in err_str.lower() or 'fk_' in err_str.lower() or 'violates' in err_str.lower():
+                        fk_skipped += 1
+                        print(f"FK skip for project {p_code}: {err_str}")
+                    else:
+                        insert_errors.append(f"project {p_code}: {err_str}")
+                        print(f"Insert error for project {p_code}: {err_str}")
         new_count -= fk_skipped  # Adjust count for FK skips
 
         if to_update:

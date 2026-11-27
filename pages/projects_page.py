@@ -2,12 +2,13 @@ import streamlit as st
 import datetime
 import pandas as pd
 import io
-from database.queries import get_project_reports
+from database.queries import get_all_projects
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _cached_project_reports():
-    return get_project_reports()
+def _cached_projects():
+    """Fetch projects from the 'project' table (source of truth for Project V1)."""
+    return get_all_projects()
 
 def _prepare_projects_list(df):
     """Convert DataFrame rows to JSON-serialisable dicts for the React component."""
@@ -42,7 +43,7 @@ def _prepare_projects_list(df):
 def render_projects_page():
     st.subheader("Projects", divider="blue")
     
-    df = _cached_project_reports()
+    df = _cached_projects()
     
     if df.empty:
         st.info("No projects found.")
